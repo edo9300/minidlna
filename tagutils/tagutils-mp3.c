@@ -550,7 +550,7 @@ _get_mp3fileinfo(char *file, struct song_metadata *psong)
 	off_t fp_size = 0;
 	off_t file_size;
 	unsigned char buffer[1024];
-	int index;
+	unsigned int index;
 
 	int xing_flags;
 	int found;

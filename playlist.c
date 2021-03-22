@@ -19,12 +19,14 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#include <libgen.h>
 #include <limits.h>
 
+#ifdef _WIN32
+#else
+#include <libgen.h>
 #include <unistd.h>
+#endif
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
 
 #include "tagutils/tagutils.h"
@@ -40,12 +42,12 @@ int
 insert_playlist(const char *path, const char *name)
 {
 	struct song_metadata plist;
-	struct stat file;
+	struct my_stat file;
 	int items = 0, matches, ret;
 	char *objname;
 	char type[4];
 
-	if (stat(path, &file) != 0)
+	if (my_stat(path, &file) != 0)
 		return -1;
 
 	strncpyt(type, strrchr(name, '.')+1, 4);
@@ -117,11 +119,11 @@ fill_playlists(void)
 {
 	int rows, i, found, len;
 	char **result;
-	char *plpath, *plname, *fname, *last_dir;
+	char *plpath, *plname, *fname = "", *last_dir;
 	unsigned int hash, last_hash = 0;
 	char class[] = "playlistContainer";
 	struct song_metadata plist;
-	struct stat file;
+	struct my_stat file;
 	char type[4];
 	int64_t plID, detailID;
 	char sql_buf[] = "SELECT ID, NAME, PATH from PLAYLISTS where ITEMS > FOUND";

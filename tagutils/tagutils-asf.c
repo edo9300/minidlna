@@ -19,10 +19,15 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
+#ifdef _WIN32
+#include <stdint.h>
+#include <stdio.h>
+#else
 #ifdef HAVE_MACHINE_ENDIAN_H
 #include <machine/endian.h>
 #else
 #include <endian.h>
+#endif
 #endif
 
 static inline uint16_t
@@ -153,7 +158,7 @@ utf16le_to_utf8(char *dst, int n, uint16_t utf16le)
 static int
 _asf_read_file_properties(FILE *fp, asf_file_properties_t *p, uint32_t size)
 {
-	int len;
+	unsigned int len;
 
 	len = sizeof(*p) - offsetof(asf_file_properties_t, FileID);
 	if(size < len)
@@ -220,7 +225,7 @@ _asf_read_media_stream(FILE *fp, struct song_metadata *psong, uint32_t size)
 {
 	asf_media_stream_t s;
 	avi_audio_format_t wfx;
-	int len;
+	unsigned int len;
 
 	len = sizeof(s) - sizeof(s.Hdr);
 	if(len > size)
@@ -253,7 +258,7 @@ static int
 _asf_read_stream_object(FILE *fp, struct song_metadata *psong, uint32_t size)
 {
 	asf_stream_object_t s;
-	int len;
+	unsigned int len;
 
 	len = sizeof(s) - sizeof(asf_object_t);
 	if(size < len)
@@ -280,7 +285,7 @@ static int
 _asf_read_extended_stream_object(FILE *fp, struct song_metadata *psong, uint32_t size)
 {
 	int i, len;
-	long off;
+	unsigned long off;
 	asf_object_t tmp;
 	asf_extended_stream_object_t xs;
 	asf_stream_name_t nm;
@@ -327,7 +332,7 @@ _asf_read_extended_stream_object(FILE *fp, struct song_metadata *psong, uint32_t
 		if(sizeof(tmp) != fread(&tmp, 1, sizeof(tmp), fp))
 			return -1;
 		if(IsEqualGUID(&tmp.ID, &ASF_StreamHeader))
-			_asf_read_stream_object(fp, psong, tmp.Size);
+			_asf_read_stream_object(fp, psong, (uint32_t)tmp.Size);
 	}
 
 	return 0;
@@ -337,7 +342,7 @@ static int
 _asf_read_header_extension(FILE *fp, struct song_metadata *psong, uint32_t size)
 {
 	off_t pos;
-	long off;
+	unsigned long off;
 	asf_header_extension_t ext;
 	asf_object_t tmp;
 
@@ -360,9 +365,9 @@ _asf_read_header_extension(FILE *fp, struct song_metadata *psong, uint32_t size)
 		if(off + tmp.Size > ext.DataSize)
 			break;
 		if(IsEqualGUID(&tmp.ID, &ASF_ExtendedStreamPropertiesObject))
-			_asf_read_extended_stream_object(fp, psong, tmp.Size);
+			_asf_read_extended_stream_object(fp, psong, (uint32_t)tmp.Size);
 
-		off += tmp.Size;
+		off += (unsigned long)tmp.Size;
 		fseek(fp, pos + off, SEEK_SET);
 	}
 
@@ -457,7 +462,7 @@ _asf_load_picture(FILE *fp, int size, void *bm, int *bm_size)
 #endif
 	for(i = 0; i < sizeof(buf) - 1; i++)
 	{
-		buf[i] = fget_le16(fp); size -= 2;
+		buf[i] = (char)fget_le16(fp); size -= 2;
 		if(!buf[i])
 			break;
 	}
@@ -570,9 +575,9 @@ _get_asffileinfo(char *file, struct song_metadata *psong)
 
 		if(IsEqualGUID(&tmp.ID, &ASF_FileProperties))
 		{
-			_asf_read_file_properties(fp, &FileProperties, tmp.Size);
-			psong->song_length = le64_to_cpu(FileProperties.PlayDuration) / 10000;
-			psong->bitrate = le64_to_cpu(FileProperties.MaxBitrate);
+			_asf_read_file_properties(fp, &FileProperties, (uint32_t)tmp.Size);
+			psong->song_length = (int)le64_to_cpu(FileProperties.PlayDuration) / 10000;
+			psong->bitrate = (int)le64_to_cpu(FileProperties.MaxBitrate);
 			psong->max_bitrate = psong->bitrate;
 		}
 		else if(IsEqualGUID(&tmp.ID, &ASF_ContentDescription))
@@ -678,13 +683,13 @@ _get_asffileinfo(char *file, struct song_metadata *psong)
 		}
 		else if(IsEqualGUID(&tmp.ID, &ASF_StreamHeader))
 		{
-			_asf_read_stream_object(fp, psong, tmp.Size);
+			_asf_read_stream_object(fp, psong, (uint32_t)tmp.Size);
 		}
 		else if(IsEqualGUID(&tmp.ID, &ASF_HeaderExtension))
 		{
-			_asf_read_header_extension(fp, psong, tmp.Size);
+			_asf_read_header_extension(fp, psong, (uint32_t)tmp.Size);
 		}
-		pos += tmp.Size;
+		pos += (off_t)tmp.Size;
 		fseek(fp, pos, SEEK_SET);
 		NumObjects--;
 	}

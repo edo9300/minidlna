@@ -21,13 +21,19 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <libgen.h>
 #include <signal.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include "dirent.h"
+#include <io.h>
+#define sleep(x) Sleep(x * 1000)
+#define rindex strrchr
+#else
+#include <unistd.h>
+#include <dirent.h>
+#include <libgen.h>
 #include <sys/time.h>
 #ifdef HAVE_INOTIFY
 #include <sys/resource.h>
@@ -35,8 +41,11 @@
 #ifdef HAVE_SYS_INOTIFY_H
 #include <sys/inotify.h>
 #else
+#ifndef __CYGWIN__
 #include "linux/inotify.h"
 #include "linux/inotify-syscalls.h"
+#endif // __CYGWIN__
+#endif
 #endif
 #endif
 #include "libav.h"
@@ -59,6 +68,23 @@ static time_t next_pl_fill = 0;
 #define DESIRED_WATCH_LIMIT 65536
 
 #define PATH_BUF_SIZE PATH_MAX
+
+#if defined(__CYGWIN__) || defined(_WIN32)
+
+#ifdef _WIN32
+static char* normalize_path(char* str) {
+	char* current_pos = strchr(str, '\\');
+	while(current_pos) {
+		*current_pos = '/';
+		current_pos = strchr(current_pos, '\\');
+	}
+	return str;
+}
+#else
+#include <sys/cygwin.h>
+#endif
+
+#else // __CYGWIN__
 
 struct watch
 {
@@ -99,7 +125,7 @@ next_highest(unsigned int num)
 static void
 raise_watch_limit(unsigned int limit)
 {
-	FILE *max_watches = fopen("/proc/sys/fs/inotify/max_user_watches", "r+");
+	FILE *max_watches = my_fopen("/proc/sys/fs/inotify/max_user_watches", "r+");
 	if (!max_watches)
 		return;
 	if (!limit)
@@ -188,7 +214,7 @@ inotify_create_watches(int fd)
 	}
 	sqlite3_free_table(result);
 		
-	max_watches = fopen("/proc/sys/fs/inotify/max_user_watches", "r");
+	max_watches = my_fopen("/proc/sys/fs/inotify/max_user_watches", "r");
 	if( max_watches )
 	{
 		if( fscanf(max_watches, "%10u", &watch_limit) < 1 )
@@ -196,7 +222,7 @@ inotify_create_watches(int fd)
 		fclose(max_watches);
 		if( (watch_limit < DESIRED_WATCH_LIMIT) || (watch_limit < (num_watches*4/3)) )
 		{
-			if (access("/proc/sys/fs/inotify/max_user_watches", W_OK) == 0)
+			if (my_access("/proc/sys/fs/inotify/max_user_watches", W_OK) == 0)
 			{
 				if( DESIRED_WATCH_LIMIT >= (num_watches*3/4) )
 				{
@@ -326,6 +352,7 @@ monitor_remove_file(const char * path)
 
 	return 0;
 }
+#endif // __CYGWIN__
 
 static char *
 check_nfo(const char *path)
@@ -373,7 +400,11 @@ monitor_insert_file(const char *name, const char *path)
 		sqlite3_free(vpath);
 		DPRINTF(E_DEBUG, L_INOTIFY, "Found modified nfo %s\n", video);
 		monitor_remove_file(video);
+#ifdef _WIN32
+		name = strrchr(video, '\\');
+#else
 		name = strrchr(video, '/');
+#endif
 		if (!name)
 			return -1;
 		name++;
@@ -442,9 +473,15 @@ monitor_insert_file(const char *name, const char *path)
 			strcpy(last_dir, parent_buf);
 			parent_buf = dirname(parent_buf);
 		}
-		while( strcmp(parent_buf, "/") != 0 );
+#ifdef _WIN32
+		while(*parent_buf);
 
-		if( strcmp(parent_buf, "/") == 0 )
+		if(*parent_buf == 0)
+#else
+		while( strcmp(parent_buf, "/") != 0  && strcmp(parent_buf, "//") != 0 );
+
+		if( strcmp(parent_buf, "/") == 0 || strcmp(parent_buf, "//") == 0 )
+#endif
 		{
 			id = sqlite3_mprintf("%s", BROWSEDIR_ID);
 			depth = 0;
@@ -460,6 +497,11 @@ monitor_insert_file(const char *name, const char *path)
 	{
 		//DEBUG DPRINTF(E_DEBUG, L_INOTIFY, "Inserting %s\n", name);
 		int ret = insert_file(name, path, id+2, get_next_available_id("OBJECTS", id), dir_types);
+
+#if defined(__CYGWIN__) || defined(_WIN32)
+		DPRINTF(E_DEBUG, L_INOTIFY, "Inserting %s:%s\n", name, path);
+#endif // __CYGWIN__
+
 		if (ret == 1 && (mtype & TYPE_PLAYLIST))
 		{
 			next_pl_fill = time(NULL) + 120; // Schedule a playlist scan for 2 minutes from now.
@@ -480,8 +522,13 @@ monitor_insert_directory(int fd, char *name, const char * path)
 	enum file_types type = TYPE_UNKNOWN;
 	media_types dir_types;
 	struct stat st;
+	(void)st;
 
-	if( access(path, R_OK|X_OK) != 0 )
+#ifdef _WIN32
+	if(my_access(path, R_OK) != 0)
+#else
+	if( my_access(path, R_OK|X_OK) != 0 )
+#endif
 	{
 		DPRINTF(E_WARN, L_INOTIFY, "Could not access %s [%s]\n", path, strerror(errno));
 		return -1;
@@ -504,6 +551,7 @@ monitor_insert_directory(int fd, char *name, const char * path)
 		free(parent_buf);
 	}
 
+#if !defined(__CYGWIN__) && !defined(_WIN32)
 	if( fd > 0 )
 	{
 		#ifdef HAVE_INOTIFY
@@ -518,6 +566,7 @@ monitor_insert_directory(int fd, char *name, const char * path)
 		}
 		#endif
 	}
+#endif // __CYGWIN__
 
 	dir_types = valid_media_types(path);
 
@@ -538,7 +587,9 @@ monitor_insert_directory(int fd, char *name, const char * path)
 			case DT_DIR:
 			case DT_REG:
 			case DT_LNK:
+#ifndef _WIN32
 			case DT_UNKNOWN:
+#endif
 				type = resolve_unknown_type(path_buf, dir_types);
 			default:
 				break;
@@ -549,7 +600,13 @@ monitor_insert_directory(int fd, char *name, const char * path)
 		}
 		else if( type == TYPE_FILE )
 		{
+#ifdef _WIN32
+			if(TRUE)
+#elif defined(_CYGWIN__)
 			if( (stat(path_buf, &st) == 0) && (st.st_blocks<<9 >= st.st_size) )
+#else // __CYGWIN__
+			if( (stat(path_buf, &st) == 0) && (st.st_blocks*S_BLKSIZE >= st.st_size) )
+#endif // __CYGWIN__
 			{
 				monitor_insert_file(esc_name, path_buf);
 			}
@@ -571,12 +628,14 @@ monitor_remove_directory(int fd, const char * path)
 
 	/* Invalidate the scanner cache so we don't insert files into non-existent containers */
 	valid_cache = 0;
+#ifdef HAVE_INOTIFY
+#if !defined(__CYGWIN__) && !defined(_WIN32)
 	if( fd > 0 )
 	{
-		#ifdef HAVE_INOTIFY
 		remove_watch(fd, path);
-		#endif
 	}
+#endif // __CYGWIN__
+#endif
 	sql = sqlite3_mprintf("SELECT ID from DETAILS where (PATH > '%q/' and PATH <= '%q/%c')"
 	                      " or PATH = '%q'", path, path, 0xFF, path);
 	if( (sql_get_table(db, sql, &result, &rows, NULL) == SQLITE_OK) )
@@ -601,6 +660,7 @@ monitor_remove_directory(int fd, const char * path)
 }
 
 #ifdef HAVE_INOTIFY
+#if !defined(__CYGWIN__) && !defined(_WIN32)
 void *
 start_inotify(void)
 {
@@ -732,4 +792,289 @@ quitting:
 
 	return 0;
 }
+#else // __CYGWIN__
+
+#include <windows.h>
+//#include <dirent.h> // for opendir()
+#ifndef _WIN32
+#include <unistd.h> // for stat()
+#endif
+
+#define BUFF_SIZE (64*1024)
+
+#define WATCH_LIMIT 16
+
+// Required parameters for ReadDirectoryChangesW().
+static FILE_NOTIFY_INFORMATION *m_Buffer[WATCH_LIMIT];
+static HANDLE m_hDirectory[WATCH_LIMIT];
+static OVERLAPPED m_Overlapped[WATCH_LIMIT];
+static HANDLE hEvents[WATCH_LIMIT];
+static char *search_path_win[WATCH_LIMIT];
+
+static VOID
+insert_to_delete_from_db(int searchNo)
+{
+	FILE_NOTIFY_INFORMATION *m_BufferTmp;
+
+	int NextOff, FileNumLenMB;
+	char path_buf[PATH_BUF_SIZE], fullPath[PATH_BUF_SIZE];
+	int fd=0, ret_stat;
+	char * esc_name = NULL;
+	struct stat file_stat;
+
+	m_BufferTmp = 	m_Buffer[searchNo];
+	do {
+		FileNumLenMB = WideCharToMultiByte (CP_UTF8, 0, &(m_BufferTmp->FileName[0]), m_BufferTmp->FileNameLength/2, path_buf, PATH_BUF_SIZE, NULL, NULL);
+		path_buf[FileNumLenMB] = '\0';
+		sprintf(fullPath, "%s\\%s", search_path_win[searchNo], path_buf);
+#ifdef _WIN32
+		strncpy(path_buf, fullPath, PATH_BUF_SIZE);
+		normalize_path(path_buf);
+#else
+		cygwin_conv_path (CCP_WIN_A_TO_POSIX | CCP_ABSOLUTE, fullPath, path_buf, PATH_BUF_SIZE);
+#endif
+
+		//DPRINTF(E_DEBUG, L_INOTIFY, "path_buf:%s, rindex:%s\n", path_buf, rindex(path_buf, '\\')+1);
+		esc_name = modifyString(strdup(rindex(path_buf, '/') + 1), "&", "&amp;amp;", 0);
+		//DPRINTF(E_DEBUG, L_INOTIFY, "esc_name %s\n", esc_name);
+
+		ret_stat = stat(path_buf, &file_stat);
+		if ((m_BufferTmp->Action == FILE_ACTION_REMOVED) || (ret_stat != 0))
+		{
+			// there is no way to distinguish file/dir in case of delete.
+			// so try to delete both file and directory. it looks working.
+			DPRINTF(E_DEBUG, L_INOTIFY, "The file/directory %s was %s.\n",
+					path_buf,
+					m_BufferTmp->Action == FILE_ACTION_RENAMED_OLD_NAME ? "renamed" : "deleted/moved away");
+			if (monitor_remove_file(path_buf) != 0)
+				monitor_remove_directory(fd, path_buf);
+		}
+		else {
+			if (!S_ISDIR(file_stat.st_mode))
+			{ // file
+				if ( (m_BufferTmp->Action == FILE_ACTION_ADDED)
+				  || (m_BufferTmp->Action == FILE_ACTION_MODIFIED)
+				  || (m_BufferTmp->Action == FILE_ACTION_RENAMED_NEW_NAME))
+				{
+					DPRINTF(E_DEBUG, L_INOTIFY, "The file %s %s.\n",
+							path_buf,
+							m_BufferTmp->Action ==  FILE_ACTION_ADDED ? "was created/moved here" : 
+													FILE_ACTION_RENAMED_NEW_NAME ? "is new(renamed) name" : "was changed");
+					if (file_stat.st_size != 0)
+						monitor_insert_file(esc_name, path_buf);
+				}
+				else if (m_BufferTmp->Action == FILE_ACTION_RENAMED_OLD_NAME)
+				{
+					DPRINTF(E_DEBUG, L_INOTIFY, "The file %s was renamed.\n", path_buf);
+					monitor_remove_file(path_buf);
+				}
+			}
+			else
+			{ // directory
+				if ( (m_BufferTmp->Action == FILE_ACTION_ADDED)
+				  || (m_BufferTmp->Action == FILE_ACTION_RENAMED_NEW_NAME))
+				{
+					DPRINTF(E_DEBUG, L_INOTIFY,  "The directory %s %s.\n",
+							path_buf,
+							m_BufferTmp->Action == FILE_ACTION_RENAMED_NEW_NAME ? "is new(renamed) name" : "was created/moved here");
+					monitor_insert_directory(fd, esc_name, path_buf);
+				}
+				else if (m_BufferTmp->Action == FILE_ACTION_RENAMED_OLD_NAME)
+				{
+					DPRINTF(E_DEBUG, L_INOTIFY, "The directory %s was renamed.\n", path_buf);
+					monitor_remove_directory(fd, path_buf);
+				}
+			}
+		}
+		free(esc_name);
+		NextOff = m_BufferTmp->NextEntryOffset;
+		m_BufferTmp = (FILE_NOTIFY_INFORMATION *)((char *)m_BufferTmp + NextOff);
+	} while (NextOff != 0);
+}
+
+static BOOL
+registerReadDirChg_block(HANDLE hDirectory, FILE_NOTIFY_INFORMATION *buf, OVERLAPPED *overlapped)
+{
+	DWORD dwBytes;
+
+	// This call needs to be reissued after every APC.
+	return ReadDirectoryChangesW(
+		hDirectory,						// handle to directory
+		buf,							// read results buffer
+		BUFF_SIZE,						// length of buffer
+		(BOOL)1,						// monitor subtree
+		FILE_NOTIFY_CHANGE_LAST_WRITE
+		|FILE_NOTIFY_CHANGE_CREATION
+		|FILE_NOTIFY_CHANGE_SIZE
+		|FILE_NOTIFY_CHANGE_DIR_NAME
+		|FILE_NOTIFY_CHANGE_FILE_NAME,	// filter conditions
+		&dwBytes,						// bytes returned
+		overlapped,						// overlapped buffer
+		NULL);							// completion routine : Not used
+}
+
+static int
+inotify_create_watches()
+{
+	struct media_dir_s * media_path;
+	HANDLE hret;
+	int num_watches=0;
+ 
+	media_path = media_dirs;
+	for (num_watches = 0 ; media_path && (num_watches < WATCH_LIMIT) ; num_watches++)
+	{
+		char path_win_style[PATH_BUF_SIZE];
+#ifdef _WIN32
+		strncpy(path_win_style, media_path->path, PATH_BUF_SIZE);
+#else
+		cygwin_conv_path (CCP_POSIX_TO_WIN_A | CCP_ABSOLUTE, media_path->path, path_win_style, PATH_BUF_SIZE);
+#endif
+
+		hret = CreateFile(
+			path_win_style,					// pointer to the file name
+			FILE_LIST_DIRECTORY,            // access (read/write) mode
+			FILE_SHARE_READ					// share mode
+			| FILE_SHARE_WRITE
+			| FILE_SHARE_DELETE,
+			NULL,                           // security descriptor
+			OPEN_EXISTING,                  // how to create
+			FILE_FLAG_BACKUP_SEMANTICS		// file attributes
+			| FILE_FLAG_OVERLAPPED,
+			NULL);                          // file with attributes to copy
+		if (hret == INVALID_HANDLE_VALUE)
+		{
+			DPRINTF(E_ERROR, L_INOTIFY, "can not open directory : %s\n", path_win_style);
+			break;
+		}
+		m_hDirectory[num_watches] = hret;
+		if ((m_Buffer[num_watches] = (FILE_NOTIFY_INFORMATION *)malloc(BUFF_SIZE)) == NULL)
+		{
+			DPRINTF(E_ERROR, L_INOTIFY, "can not malloc for inotify\n\n");
+			break;
+		}
+		if (xasprintf(&search_path_win[num_watches], "%s", path_win_style) < 0) {
+			DPRINTF(E_ERROR, L_INOTIFY, "can not malloc for inotify\n\n");
+			break;
+		}
+
+		memset(&m_Overlapped[num_watches], 0, sizeof(OVERLAPPED));  // Fill OVERLAPPED structure
+		m_Overlapped[num_watches].hEvent = CreateEvent(
+			NULL,                   // security attributes
+			TRUE,                   // manually reset
+			FALSE,                  // unsignaled
+			NULL);                  // name
+		hEvents[num_watches] = m_Overlapped[num_watches].hEvent;
+
+		if (registerReadDirChg_block(m_hDirectory[num_watches], m_Buffer[num_watches], &m_Overlapped[num_watches]) == 0) {
+			DPRINTF(E_ERROR, L_INOTIFY, "ReadDirectoryChangesW failed with 0x%x\n", GetLastError());
+		}
+
+		DPRINTF(E_INFO, L_INOTIFY, "Add directory : %s : %s\n", media_path->path, path_win_style);
+		media_path = media_path->next;
+	}
+
+	return num_watches;
+}
+
+
+#ifdef _WIN32
+DWORD WINAPI start_inotify(LPVOID lpParam)
+#else
+void *
+start_inotify()
+#endif
+{
+	BOOL bResult;
+	DWORD dwError, dwResult;
+	int i, eventNo;
+	DWORD dwBytes=0;
+	DWORD timeout = 5000;
+	int num_watches=0;
+
+	while(GETFLAG(SCANNING_MASK))
+	{
+		if( quitting )
+			goto quitting;
+		sleep(1);
+	}
+
+	num_watches = inotify_create_watches();
+	if (!num_watches) 
+	{
+		DPRINTF(E_WARN, L_INOTIFY,  "Failed to create watch\n");
+		return 0;
+	}
+
+	if (
+#ifdef _WIN32
+		(SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) == 0)
+#else
+		(setpriority(PRIO_PROCESS, 0, 19) == 0)
+#endif
+		)
+		DPRINTF(E_WARN, L_INOTIFY,  "Failed to reduce inotify thread priority\n");
+	av_register_all();
+
+	while( !quitting )
+	{
+		// Wait for overlapped result and for stop event
+		//DPRINTF(E_DEBUG, L_INOTIFY,  "Wait for %d overlapped result and for stop event\n", num_watches);
+		dwResult = WaitForMultipleObjects(num_watches, hEvents, FALSE, timeout);
+		dwError = GetLastError();
+		//DPRINTF(E_DEBUG, L_INOTIFY,  "event occured WAIT_OBJECT_0+%d\n", dwResult - WAIT_OBJECT_0);
+		if( dwResult == WAIT_TIMEOUT )
+		{
+			if( next_pl_fill && (time(NULL) >= next_pl_fill) )
+			{
+				fill_playlists();
+				next_pl_fill = 0;
+			}
+			continue;
+		}
+		else if( (WAIT_OBJECT_0 <= dwResult) && (dwResult < (WAIT_OBJECT_0 + num_watches)) )
+		{  // overlapped operation finished
+			eventNo = dwResult - WAIT_OBJECT_0;
+			bResult = GetOverlappedResult( m_hDirectory[eventNo], &m_Overlapped[eventNo], &dwBytes, TRUE );
+			dwError = GetLastError();
+
+			if ( ! bResult )
+			{
+				DPRINTF(E_ERROR, L_INOTIFY, "read failed!\n");
+			}
+			else
+			{
+				// handle results of asynchronous operation
+				insert_to_delete_from_db(eventNo);
+				// It is better to call registerReadDirChg_block() then NotificationCompletion()
+				// in order to avoid miss catch the events, but ...
+				// Get the new read issued as fast as possible. The documentation
+				// says that the original OVERLAPPED structure will not be used
+				// again once the completion routine is called.
+				bResult = registerReadDirChg_block(m_hDirectory[eventNo], m_Buffer[eventNo], &m_Overlapped[eventNo]);
+				dwError = GetLastError();
+				if ( ! bResult )
+				{
+					DPRINTF(E_ERROR, L_INOTIFY, "ReadDirectoryChangesW failed with 0x%x\n", dwError);
+				}
+			}
+			continue;
+		}
+		else
+		{
+			DPRINTF(E_ERROR, L_INOTIFY, "read failed!\n");
+			break;
+		}
+	}
+	for (i=0 ; i<num_watches ; i++)
+	{
+		CloseHandle(m_hDirectory[i]);
+		free(m_Buffer[i]);
+		free(search_path_win[i]);
+	}
+quitting:
+
+	return 0;
+}
+#endif // __CYGWIN__
+
 #endif

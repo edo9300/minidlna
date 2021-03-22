@@ -30,13 +30,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <setjmp.h>
 #include <jpeglib.h>
+#include "utils.h"
+#ifdef _WIN32
+#include <stdint.h>
+#include <stdio.h>
+#else
+#include <unistd.h>
 #ifdef HAVE_MACHINE_ENDIAN_H
 #include <machine/endian.h>
 #else
 #include <endian.h>
+#endif
 #endif
 
 #include "upnpreplyparse.h"
@@ -137,7 +143,7 @@ init_source(j_decompress_ptr cinfo)
 	return;
 }
 
-static int
+static boolean
 fill_input_buffer(j_decompress_ptr cinfo)
 {
 	struct my_src_mgr *src = (void *)cinfo->src;
@@ -238,15 +244,15 @@ image_get_jpeg_resolution(const char * path, int * width, int * height)
 	uint16_t offset, h, w;
 	int ret = 1;
 	size_t nread;
-	long size;
+	my_off_t size;
 	
 
-	img = fopen(path, "r");
+	img = my_fopen(path, "r");
 	if( !img )
 		return -1;
 
 	fseek(img, 0, SEEK_END);
-	size = ftell(img);
+	size = ftello(img);
 	rewind(img);
 
 	nread = fread(&buf, 2, 1, img);
@@ -257,7 +263,7 @@ image_get_jpeg_resolution(const char * path, int * width, int * height)
 	}
 	memset(&buf, 0, sizeof(buf));
 
-	while( ftell(img) < size )
+	while(ftello(img) < size )
 	{
 		while( nread > 0 && buf[0] != 0xFF && !feof(img) )
 			nread = fread(&buf, 1, 1, img);
@@ -307,7 +313,7 @@ image_get_jpeg_date_xmp(const char * path, char ** date)
 	int ret = 1;
 	size_t nread;
 
-	img = fopen(path, "r");
+	img = my_fopen(path, "r");
 	if( !img )
 		return(-1);
 
@@ -435,7 +441,7 @@ image_new_from_jpeg(const char *path, int is_file, const uint8_t *buf, int size,
 	jpeg_create_decompress(&cinfo);
 	if( is_file )
 	{
-		if( (file = fopen(path, "r")) == NULL )
+		if( (file = my_fopen(path, "r")) == NULL )
 		{
 			return NULL;
 		}
@@ -857,7 +863,7 @@ image_save_to_jpeg_file(image_s * pimage, char * path)
 	buf = image_save_to_jpeg_buf(pimage, &size);
 	if( !buf )
 		return NULL;
-	dst_file = fopen(path, "w");
+	dst_file = my_fopen(path, "w");
 	if( !dst_file )
 	{
 		free(buf);

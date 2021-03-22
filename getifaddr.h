@@ -28,7 +28,11 @@
  */
 #ifndef __GETIFADDR_H__
 #define __GETIFADDR_H__
+#ifdef _WIN32
+#include <WinSock2.h>
+#else
 #include <arpa/inet.h>
+#endif
 
 #define MACADDR_IS_ZERO(x) \
   ((x[0] == 0x00) && \

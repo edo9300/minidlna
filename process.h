@@ -29,7 +29,11 @@
 #ifndef __PROCESS_H__
 #define __PROCESS_H__
 
+#ifdef _WIN32
+#define pid_t int
+#else
 #include <unistd.h>
+#endif
 #include "clients.h"
 
 struct child {

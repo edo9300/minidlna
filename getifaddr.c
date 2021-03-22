@@ -26,17 +26,25 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#ifdef _WIN32
+#include <WinSock2.h>
+#include <ws2tcpip.h>
+#include <ipmib.h>
+#include <iphlpapi.h>
+typedef struct sockaddr_in sockaddr_in;
+#else
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#endif
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
 #include <errno.h>
 #if defined(sun)
 #include <sys/sockio.h>
@@ -45,7 +53,7 @@
 #include "config.h"
 #if HAVE_GETIFADDRS
 # include <ifaddrs.h>
-# ifdef __linux__
+# if defined(__linux__) || defined(__CYGWIN__)
 #  ifndef AF_LINK
 #   define AF_LINK AF_INET
 #  endif
@@ -88,6 +96,10 @@ getifaddr(const char *ifname)
 		addr_in = (struct sockaddr_in *)p->ifa_addr;
 		if (!ifname && (p->ifa_flags & (IFF_LOOPBACK | IFF_SLAVE)))
 			continue;
+#ifdef __CYGWIN__
+		if (!ifname && !(p->ifa_flags & IFF_RUNNING))
+			continue;
+#endif  // __CYGWIN__
 		memcpy(&lan_addr[n_lan_addr].addr, &addr_in->sin_addr, sizeof(lan_addr[n_lan_addr].addr));
 		if (!inet_ntop(AF_INET, &addr_in->sin_addr, lan_addr[n_lan_addr].str, sizeof(lan_addr[0].str)) )
 		{
@@ -109,6 +121,43 @@ getifaddr(const char *ifname)
 		DPRINTF(E_ERROR, L_GENERAL, "Network interface %s not found\n", ifname);
 		return -1;
 	}
+#elif defined(_WIN32)
+	(void)ifname;
+	SOCKET sd = WSASocket(AF_INET, SOCK_STREAM, 0, 0, 0, 0);
+	if(sd == SOCKET_ERROR) {
+		DPRINTF(E_ERROR, L_GENERAL, "WSASocket: %s\n", WSAGetLastError());
+		return -1;
+	}
+	INTERFACE_INFO InterfaceList[20];
+	unsigned long nBytesReturned;
+	if(WSAIoctl(sd, SIO_GET_INTERFACE_LIST, 0, 0, &InterfaceList,
+				sizeof(InterfaceList), &nBytesReturned, 0, 0) == SOCKET_ERROR) {
+		DPRINTF(E_ERROR, L_GENERAL, "SIO_GET_INTERFACE_LIST: %s\n", WSAGetLastError());
+		return -1;
+	}
+	int nNumInterfaces = nBytesReturned / sizeof(INTERFACE_INFO);
+	for(int i = 0; i < nNumInterfaces; ++i) {
+		sockaddr_in* pAddress;
+		if(InterfaceList[i].iiFlags & IFF_LOOPBACK)
+			continue;
+		pAddress = (sockaddr_in*)&(InterfaceList[i].iiAddress);
+		memcpy(&lan_addr[n_lan_addr].addr, &pAddress->sin_addr, sizeof(lan_addr[n_lan_addr].addr));
+		if(!inet_ntop(AF_INET, &pAddress->sin_addr, lan_addr[n_lan_addr].str, sizeof(lan_addr[0].str))) {
+			DPRINTF(E_ERROR, L_GENERAL, "inet_ntop(): %s\n", strerror(errno));
+			continue;
+		}
+
+		pAddress = (sockaddr_in*)&(InterfaceList[i].iiNetmask);
+
+		memcpy(&lan_addr[n_lan_addr].mask, &pAddress->sin_addr, sizeof(lan_addr[n_lan_addr].mask));
+		//lan_addr[n_lan_addr].ifindex = if_nametoindex(ifr->ifr_name);
+		lan_addr[n_lan_addr].snotify = OpenAndConfSSDPNotifySocket(&lan_addr[n_lan_addr]);
+		if(lan_addr[n_lan_addr].snotify >= 0)
+			n_lan_addr++;
+		if(ifname || n_lan_addr >= MAX_LAN_ADDR)
+			break;
+	}
+	closesocket(sd);
 #else
 	int s = socket(PF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in addr;
@@ -173,7 +222,7 @@ getsyshwaddr(char *buf, int len)
 {
 	unsigned char mac[6];
 	int ret = -1;
-#if defined(HAVE_GETIFADDRS) && !defined (__linux__) && !defined (__sun__)
+#if defined(HAVE_GETIFADDRS) && !defined (__linux__) && !defined (__sun__) && !defined(__CYGWIN__)
 	struct ifaddrs *ifap, *p;
 	struct sockaddr_in *addr_in;
 	uint8_t a;
@@ -215,6 +264,39 @@ getsyshwaddr(char *buf, int len)
 		}
 	}
 	freeifaddrs(ifap);
+#elif defined(_WIN32)
+	PIP_ADAPTER_INFO AdapterInfo;
+	DWORD dwBufLen = sizeof(IP_ADAPTER_INFO);
+
+	AdapterInfo = (IP_ADAPTER_INFO*)malloc(sizeof(IP_ADAPTER_INFO));
+	if(AdapterInfo == NULL) {
+		DPRINTF(E_ERROR, L_GENERAL, "Error allocating memory needed to call GetAdaptersinfo\n");
+		return ret;
+	}
+
+	// Make an initial call to GetAdaptersInfo to get the necessary size into the dwBufLen variable
+	if(GetAdaptersInfo(AdapterInfo, &dwBufLen) == ERROR_BUFFER_OVERFLOW) {
+		free(AdapterInfo);
+		AdapterInfo = (IP_ADAPTER_INFO*)malloc(dwBufLen);
+		if(AdapterInfo == NULL) {
+			DPRINTF(E_ERROR, L_GENERAL, "Error allocating memory needed to call GetAdaptersinfo\n");
+			return ret;
+		}
+	}
+
+	if(GetAdaptersInfo(AdapterInfo, &dwBufLen) == NO_ERROR) {
+		PIP_ADAPTER_INFO pAdapterInfo = AdapterInfo;
+		do {
+			if(MACADDR_IS_ZERO(pAdapterInfo->Address)) {
+				pAdapterInfo = pAdapterInfo->Next;
+				continue;
+			}
+			memcpy(mac, pAdapterInfo->Address, 6);
+			ret = 0;
+			break;
+	} while(pAdapterInfo);
+  }
+	free(AdapterInfo);
 #else
 	struct if_nameindex *ifaces, *if_idx;
 	struct ifreq ifr;
@@ -269,16 +351,54 @@ getsyshwaddr(char *buf, int len)
 	return ret;
 }
 
+#if  (defined(__CYGWIN__) && !defined(__x86_64)) || defined(_WIN32)
+#if defined(__CYGWIN__)
+#include <windows.h>
+//#include <winsock2.h>
+
+/* copied from winsock2.h */
+/* can not #include <winsock2.h> */
+/* because there are many defines which conflict with socket functions */
+/* just use WSACreateEvent(), WSAGetLastError(), WSAResetEvent() */
+#define WSA_IO_PENDING (ERROR_IO_PENDING)
+#ifndef WINSOCK_API_LINKAGE
+#ifdef  DECLSPEC_IMPORT
+#define WINSOCK_API_LINKAGE	DECLSPEC_IMPORT
+#else
+#define WINSOCK_API_LINKAGE
+#endif
+#endif /* WINSOCK_API_LINKAGE */
+#define WSAAPI	WINAPI
+#define WSAEVENT HANDLE
+WINSOCK_API_LINKAGE WSAEVENT WSAAPI WSACreateEvent(void);
+WINSOCK_API_LINKAGE int WSAAPI WSAGetLastError(void);
+WINSOCK_API_LINKAGE WINBOOL WSAAPI WSAResetEvent(WSAEVENT hEvent);
+#endif
+
+static OVERLAPPED overlap;
+static HANDLE hand;
+#endif // __CYGWIN__
+
+#ifdef __CYGWIN__
+#include <iphlpapi.h>
+#endif // __CYGWIN__
+
 int
 get_remote_mac(struct in_addr ip_addr, unsigned char *mac)
 {
+#if !defined(__CYGWIN__) && !defined(_WIN32)
 	struct in_addr arp_ent;
 	FILE * arp;
 	char remote_ip[16];
 	int matches, hwtype, flags;
+#else
+	PMIB_IPNETTABLE arp;
+	DWORD ret, size;
+#endif // __CYGWIN__
 	memset(mac, 0xFF, 6);
 
-	arp = fopen("/proc/net/arp", "r");
+#if !defined(__CYGWIN__) && !defined(_WIN32)
+	arp = my_fopen("/proc/net/arp", "r");
 	if (!arp)
 		return 1;
 	while (!feof(arp))
@@ -294,6 +414,28 @@ get_remote_mac(struct in_addr ip_addr, unsigned char *mac)
 		mac[0] = 0xFF;
 	}
 	fclose(arp);
+#else
+	// query for buffer size needed
+	size = 0;
+	arp = NULL;
+	ret = GetIpNetTable(arp, &size, FALSE);
+	if (ret == ERROR_INSUFFICIENT_BUFFER) {
+		// need more space
+		arp = (PMIB_IPNETTABLE) malloc(size);
+		ret = GetIpNetTable(arp, &size, FALSE);
+		if (ret == NO_ERROR && arp != NULL) {
+			for (int i = 0; i < arp->dwNumEntries; ++i) {
+				// check only 6-byte physical (MAC) addresses
+				if (arp->table[i].dwPhysAddrLen == 6 &&
+					arp->table[i].dwAddr == ip_addr.s_addr) {
+					memcpy(mac, arp->table[i].bPhysAddr, 6);
+					break;
+				}
+			}
+		}
+	}
+	free(arp);
+#endif // __CYGWIN__
 
 	if (mac[0] == 0xFF)
 	{
@@ -314,7 +456,11 @@ reload_ifaces(int force_notify)
 	for (i = 0; i < n_lan_addr; i++)
 	{
 		memcpy(&old_addr[i], &lan_addr[i].addr, sizeof(struct in_addr));
+#ifdef _WIN32
+		closesocket(lan_addr[i].snotify);
+#else
 		close(lan_addr[i].snotify);
+#endif
 	}
 	n_lan_addr = 0;
 
@@ -371,6 +517,19 @@ OpenAndConfMonitorSocket(void)
 	}
 
 	return s;
+#elif (defined(__CYGWIN__) && !defined(__x86_64)) || defined(_WIN32)
+	hand = WSACreateEvent();
+	overlap.hEvent = WSACreateEvent();
+
+	if (NotifyAddrChange(&hand, &overlap) != NO_ERROR)
+	{
+		if (WSAGetLastError() != WSA_IO_PENDING)
+		{
+			printf("NotifyAddrChange error...%d\n", WSAGetLastError());
+			return -1;
+		}
+	}
+	return -2;
 #else
 	return -1;
 #endif
@@ -401,5 +560,12 @@ ProcessMonitorEvent(int s)
 	}
 	if (changed)
 		reload_ifaces(0);
+#elif (defined(__CYGWIN__) && !defined(__x86_64)) || defined(_WIN32)
+	if (WaitForSingleObject(overlap.hEvent, 0) == WAIT_OBJECT_0)
+	{
+		WSAResetEvent(overlap.hEvent);
+		NotifyAddrChange(&hand, &overlap);
+		reload_ifaces(0);
+	}
 #endif
 }

@@ -35,11 +35,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#ifdef _WIN32
+#include <WinSock2.h>
+#include <afunix.h>
+#include <ws2ipdef.h>
+#include <WS2tcpip.h>
+#include <time.h>
+#include <io.h>
+#define close(...) closesocket(__VA_ARGS__)
+#else
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
 #include <errno.h>
 
 #include "minidlnapath.h"
@@ -104,7 +114,7 @@ OpenAndConfSSDPReceiveSocket(void)
 		return -1;
 	}	
 
-	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &i, sizeof(i)) < 0)
+	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&i, sizeof(i)) < 0)
 		DPRINTF(E_WARN, L_SSDP, "setsockopt(udp, SO_REUSEADDR): %s\n", strerror(errno));
 #ifdef __linux__
 	if (setsockopt(s, IPPROTO_IP, IP_PKTINFO, &i, sizeof(i)) < 0)
@@ -118,12 +128,36 @@ OpenAndConfSSDPReceiveSocket(void)
 	 * to receive datagramms send to this multicast address.
 	 * To specify the local nics we want to use we have to use setsockopt,
 	 * see AddMulticastMembership(...). */
-	sockname.sin_addr.s_addr = inet_addr(SSDP_MCAST_ADDR);
+	 sockname.sin_addr.s_addr = inet_addr(SSDP_MCAST_ADDR);
+#else
+#if defined(__CYGWIN__) || defined(_WIN32)
+	// Windows doesn't allow (for some reason) multicast join on already binded socket
+	{
+		int ret;
+		struct ip_mreq imr;	/* Ip multicast membership */
+		/* setting up imr structure */
+		memset(&imr, '\0', sizeof(imr));
+		imr.imr_multiaddr.s_addr = inet_addr(SSDP_MCAST_ADDR);
+		imr.imr_interface.s_addr = htonl(INADDR_ANY);
+		/* Setting the socket options will guarantee, tha we will only receive
+		 * multicast traffic on a specific Interface.
+		 * In addition the kernel is instructed to send an igmp message (choose
+		 * mcast group) on the specific interface/subnet. */
+		ret = setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void *)&imr, sizeof(imr));
+		if (ret < 0 && errno != EADDRINUSE)
+		{
+			DPRINTF(E_ERROR, L_SSDP, "setsockopt(udp, IP_ADD_MEMBERSHIP): %s\n",
+				strerror(errno));
+			DPRINTF(E_WARN, L_SSDP, "Failed to add multicast membership for address 0.0.0.0\n");
+		}
+	}
+	sockname.sin_addr.s_addr = htonl(INADDR_ANY);
 #else
 	/* NOTE: Binding to SSDP_MCAST_ADDR on Darwin & *BSD causes NOTIFY replies are
 	 * sent from SSDP_MCAST_ADDR what forces some clients to ignore subsequent
 	 * unsolicited NOTIFY packets from the real interface address. */
 	sockname.sin_addr.s_addr = htonl(INADDR_ANY);
+#endif // __CYGWIN_
 #endif
 
 	if (bind(s, (struct sockaddr *)&sockname, sizeof(struct sockaddr_in)) < 0)
@@ -182,13 +216,13 @@ OpenAndConfSSDPNotifySocket(struct lan_addr_s *iface)
 		close(s);
 		return -1;
 	}
-
+#if !defined(__CYGWIN__) && !defined(_WIN32)
 	if (AddMulticastMembership(sssdp, iface) < 0)
 	{
 		DPRINTF(E_WARN, L_SSDP, "Failed to add multicast membership for address %s\n", 
 			iface->str);
 	}
-
+#endif // __CYGWIN__
 	return s;
 }
 
@@ -204,13 +238,17 @@ static const char * const known_service_types[] =
 };
 
 static void
-_usleep(long usecs)
+_usleep(int64_t usec)
 {
-	struct timespec sleep_time;
+	HANDLE timer;
+	LARGE_INTEGER ft;
 
-	sleep_time.tv_sec = 0;
-	sleep_time.tv_nsec = usecs * 1000;
-	nanosleep(&sleep_time, NULL);
+	ft.QuadPart = -(10 * usec); // Convert to 100 nanosecond interval, negative value indicates relative time
+
+	timer = CreateWaitableTimer(NULL, TRUE, NULL);
+	SetWaitableTimer(timer, &ft, 0, NULL, NULL, 0);
+	WaitForSingleObject(timer, INFINITE);
+	CloseHandle(timer);
 }
 
 /* not really an SSDP "announce" as it is the response
@@ -351,7 +389,7 @@ ParseUPnPClient(char *location)
 		return;
 	/* Check if the client is already in cache */
 	dest.sin_family = AF_INET;
-	dest.sin_port = htons(port);
+	dest.sin_port = htons((short)port);
 
 	s = socket(PF_INET, SOCK_STREAM, 0);
 	if (s < 0)
@@ -359,8 +397,8 @@ ParseUPnPClient(char *location)
 
 	tv.tv_sec = 0;
 	tv.tv_usec = 500000;
-	setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-	setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+	setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+	setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
 
 	if (connect(s, (struct sockaddr*)&dest, sizeof(struct sockaddr_in)) < 0)
 		goto close;
@@ -722,7 +760,7 @@ ProcessSSDPRequest(int s, unsigned short port)
 					if (l != st_len)
 						break;
 				}
-				_usleep(random()>>20);
+				_usleep(rand() >> 20);
 				SendSSDPResponse(s, sendername, i,
 						 host, port, len_r);
 				return;

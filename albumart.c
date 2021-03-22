@@ -20,17 +20,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <sys/param.h>
-#include <sys/stat.h>
-#include <sys/param.h>
 #include <limits.h>
-#include <libgen.h>
 #include <setjmp.h>
 #include <errno.h>
 
 #include <jpeglib.h>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <io.h>
+#include <sys/types.h > 
+#include <sys/stat.h>
+#else
+#include <sys/param.h>
+#include <sys/stat.h>
+#include <sys/param.h>
+#include <libgen.h>
+#endif
 
 #include "upnpglobalvars.h"
 #include "albumart.h"
@@ -44,10 +51,15 @@ art_cache_exists(const char *orig_path, char **cache_file)
 {
 	if( xasprintf(cache_file, "%s/art_cache%s", db_path, orig_path) < 0 )
 		return 0;
-
+	char* found;
+	if((found = strstr(*cache_file, "/art_cache")) != NULL) {
+		found += (sizeof("/art_cache") - 1);
+		found[1] = found[0];
+		found[0] = '/';
+	}
 	strcpy(strchr(*cache_file, '\0')-4, ".jpg");
 
-	return (!access(*cache_file, F_OK));
+	return (!my_access(*cache_file, F_OK));
 }
 
 static char *
@@ -99,6 +111,7 @@ update_if_album_art(const char *path)
 	char file[MAXPATHLEN];
 	char fpath[MAXPATHLEN];
 	char dpath[MAXPATHLEN];
+	const char* filename = "";
 	int ncmp = 0;
 	int album_art;
 	DIR *dh;
@@ -130,32 +143,30 @@ update_if_album_art(const char *path)
 	dh = opendir(dir);
 	if( !dh )
 		return;
-	while ((dp = readdir(dh)) != NULL)
-	{
-		if (is_reg(dp) == 1)
+	while((dp = readdir(dh)) != NULL) {
+		if(is_reg(dp) == 1)
 			type = TYPE_FILE;
-		else if (is_dir(dp) == 1)
+		else if(is_dir(dp) == 1)
 			type = TYPE_DIR;
-		else
-		{
+		else {
 			snprintf(file, sizeof(file), "%s/%s", dir, dp->d_name);
 			type = resolve_unknown_type(file, dir_type);
 		}
 
-		if (type != TYPE_FILE || dp->d_name[0] == '.')
+		if (type != TYPE_FILE || filename[0] == '.')
 			continue;
 
-		if(((is_video(dp->d_name) && (dir_type & TYPE_VIDEO)) ||
-		    (is_audio(dp->d_name) && (dir_type & TYPE_AUDIO))) &&
-		    (album_art || strncmp(dp->d_name, match, ncmp) == 0) )
+		if(((is_video(filename) && (dir_type & TYPE_VIDEO)) ||
+		    (is_audio(filename) && (dir_type & TYPE_AUDIO))) &&
+		    (album_art || strncmp(filename, match, ncmp) == 0) )
 		{
-			snprintf(file, sizeof(file), "%s/%s", dir, dp->d_name);
+			snprintf(file, sizeof(file), "%s/%s", dir, filename);
 			art_id = find_album_art(file, NULL, 0);
 			ret = sql_exec(db, "UPDATE DETAILS set ALBUM_ART = %lld where PATH = '%q' and ALBUM_ART != %lld", (long long)art_id, file, (long long)art_id);
 			if( ret == SQLITE_OK )
-				DPRINTF(E_DEBUG, L_METADATA, "Updated cover art for %s to %s\n", dp->d_name, path);
+				DPRINTF(E_DEBUG, L_METADATA, "Updated cover art for %s to %s\n", filename, path);
 			else
-				DPRINTF(E_WARN, L_METADATA, "Error setting %s as cover art for %s\n", match, dp->d_name);
+				DPRINTF(E_WARN, L_METADATA, "Error setting %s as cover art for %s\n", match, filename);
 		}
 	}
 	closedir(dh);
@@ -228,7 +239,7 @@ check_embedded_art(const char *path, uint8_t *image_data, int image_size)
 		cache_dir = strdup(art_path);
 		make_dir(dirname(cache_dir), S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
 		free(cache_dir);
-		dstfile = fopen(art_path, "w");
+		dstfile = my_fopen(art_path, "w");
 		if( !dstfile )
 		{
 			free(art_path);
@@ -275,7 +286,7 @@ check_for_album_file(const char *path)
 	struct stat st;
 	int ret;
 
-	if( stat(path, &st) != 0 )
+	if(stat(path, &st) != 0 )
 		return NULL;
 
 	if( S_ISDIR(st.st_mode) )
@@ -288,7 +299,7 @@ check_for_album_file(const char *path)
 
 	/* First look for file-specific cover art */
 	snprintf(file, sizeof(file), "%s.cover.jpg", path);
-	ret = access(file, R_OK);
+	ret = my_access(file, R_OK);
 	if( ret != 0 )
 	{
 		strncpyt(file, path, sizeof(file));
@@ -296,7 +307,7 @@ check_for_album_file(const char *path)
 		if( p )
 		{
 			strcpy(p, ".jpg");
-			ret = access(file, R_OK);
+			ret = my_access(file, R_OK);
 		}
 		if( ret != 0 )
 		{
@@ -305,7 +316,7 @@ check_for_album_file(const char *path)
 			{
 				memmove(p+2, p+1, file+MAXPATHLEN-p-2);
 				p[1] = '.';
-				ret = access(file, R_OK);
+				ret = my_access(file, R_OK);
 			}
 		}
 	}
@@ -323,7 +334,7 @@ check_dir:
 	for( album_art_name = album_art_names; album_art_name; album_art_name = album_art_name->next )
 	{
 		snprintf(file, sizeof(file), "%s/%s", dir, album_art_name->name);
-		if( access(file, R_OK) == 0 )
+		if( my_access(file, R_OK) == 0 )
 		{
 			if( art_cache_exists(file, &art_file) )
 			{

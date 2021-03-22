@@ -31,7 +31,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdint.h>
-#include <libgen.h>
+#include "../utils.h"
+//#include <libgen.h>
 
 #define ROLE_NOUSE 0
 #define ROLE_START 1
@@ -114,10 +115,10 @@ struct song_metadata {
 
 extern int scan_init(char *path);
 extern void make_composite_tags(struct song_metadata *psong);
-extern int readtags(char *path, struct song_metadata *psong, struct stat *stat, char *lang, char *type);
+extern int readtags(char *path, struct song_metadata *psong, struct my_stat*stat, char *lang, char *type);
 extern void freetags(struct song_metadata *psong);
 
-extern int start_plist(const char *path, struct song_metadata *psong, struct stat *stat, char *lang, char *type);
-extern int next_plist_track(struct song_metadata *psong, struct stat *stat, char *lang, char *type);
+extern int start_plist(const char *path, struct song_metadata *psong, struct my_stat*stat, char *lang, char *type);
+extern int next_plist_track(struct song_metadata *psong, struct my_stat*stat, char *lang, char *type);
 
 #endif

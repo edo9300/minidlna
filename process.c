@@ -29,14 +29,21 @@
  */
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
 #include <signal.h>
+#ifdef _WIN32
+#include <WinSock2.h>
+#include <Windows.h>
+extern HANDLE hMutexHandle;
+HANDLE hMutexHandle = INVALID_HANDLE_VALUE;
+#else
+#include <unistd.h>
 #include <sys/wait.h>
+#endif
 
 #include "upnpglobalvars.h"
 #include "process.h"
@@ -82,9 +89,11 @@ remove_process_info(pid_t pid)
 	}
 }
 
+#if USE_FORK
 pid_t
 process_fork(struct client_cache_s *client)
 {
+	DPRINTF(E_WARN, L_GENERAL, "Forking process forking\n");
 	if (number_of_children >= runtime_vars.max_connections)
 	{
 		DPRINTF(E_WARN, L_GENERAL, "Exceeded max connections [%d], not forking\n",
@@ -96,15 +105,19 @@ process_fork(struct client_cache_s *client)
 	pid_t pid = fork();
 	if (pid > 0)
 	{
+		DPRINTF(E_WARN, L_GENERAL, "Process forked\n");
 		if (client)
 			client->connections++;
 		add_process_info(pid, client);
 		number_of_children++;
 	}
+	DPRINTF(E_WARN, L_GENERAL, "After fork check, pid is: %d\n", pid);
 
 	return pid;
 }
+#endif
 
+#ifndef _WIN32
 void
 process_handle_child_termination(int signal)
 {
@@ -123,12 +136,17 @@ process_handle_child_termination(int signal)
 		remove_process_info(pid);
 	}
 }
+#endif
 
 int
 process_daemonize(void)
 {
-	int pid;
-#ifndef USE_DAEMON
+	int pid = 0;
+#ifdef _WIN32
+	FreeConsole();
+#endif
+#if USE_FORK
+#ifdef USE_DAEMON
 	int i;
 
 	switch(fork())
@@ -141,6 +159,7 @@ process_daemonize(void)
 		/* child process */
 		case 0:
 		/* obtain a new process group */
+#ifndef _WIN32
 			if( (pid = setsid()) < 0)
 			{
 				perror("setsid()");
@@ -148,7 +167,7 @@ process_daemonize(void)
 			}
 
 			/* close all descriptors */
-			for (i=getdtablesize();i>=0;--i) close(i);		
+			for (i=getdtablesize();i>=0;--i) close(i);
 
 			i = open("/dev/null",O_RDWR); /* open stdin */
 			dup(i); /* stdout */
@@ -156,6 +175,7 @@ process_daemonize(void)
 
 			umask(027);
 			chdir("/");
+#endif
 
 			break;
 		/* parent process */
@@ -163,16 +183,27 @@ process_daemonize(void)
 			exit(0);
 	}
 #else
+#ifndef __CYGWIN__
 	if( daemon(0, 0) < 0 )
+#else
+	if( daemon(1, 0) < 0) // keep current cwd
+#endif // __CYGWIN__
 		perror("daemon()");
 	pid = getpid();
 #endif
+#endif
 	return pid;
 }
-
 int
 process_check_if_running(const char *fname)
 {
+#ifdef _WIN32
+	// ensure only one running instance
+	HANDLE hMutexHandle = CreateMutex(NULL, TRUE, fname);
+	if(GetLastError() == ERROR_ALREADY_EXISTS) {
+		return -1;
+	}
+#else
 	char buffer[64];
 	int pidfile;
 	pid_t pid;
@@ -198,13 +229,14 @@ process_check_if_running(const char *fname)
 	}
 
 	close(pidfile);
-
+#endif
 	return 0;
 }
 
 void
 process_reap_children(void)
 {
+#ifndef _WIN32
 	struct child *child;
 	int i;
 
@@ -214,4 +246,6 @@ process_reap_children(void)
 		if (child->pid)
 			kill(child->pid, SIGKILL);
 	}
+#endif
 }
+

@@ -47,21 +47,27 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <stdlib.h>
-#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/param.h>
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <limits.h>
+
+#ifdef _WIN32
+#include <WinSock2.h>
+#include <io.h>
+#else
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/param.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-#include <limits.h>
+#endif
 
 #include "config.h"
 #include "upnpglobalvars.h"
@@ -111,6 +117,13 @@ New_upnphttp(int s)
 	ret = (struct upnphttp *)malloc(sizeof(struct upnphttp));
 	if(ret == NULL)
 		return NULL;
+#ifdef _WIN32
+	u_long iMode = 1;
+	int iResult = ioctlsocket(s, FIONBIO, &iMode);
+	if(iResult != NO_ERROR) {
+		DPRINTF(E_ERROR, L_HTTP, "New_upnphttp: ioctlsocket(%d): %ld\n", s, iResult);
+	}
+#endif
 	memset(ret, 0, sizeof(struct upnphttp));
 	ret->socket = s;
 	return ret;
@@ -119,7 +132,11 @@ New_upnphttp(int s)
 void
 CloseSocket_upnphttp(struct upnphttp * h)
 {
+#ifdef _WIN32
+	if(closesocket(h->socket) < 0)
+#else
 	if(close(h->socket) < 0)
+#endif
 	{
 		DPRINTF(E_ERROR, L_HTTP, "CloseSocket_upnphttp: close(%d): %s\n", h->socket, strerror(errno));
 	}
@@ -254,8 +271,8 @@ ParseHttpHeaders(struct upnphttp * h)
 					p++;
 				if(strncasecmp(p, "bytes=", 6)==0) {
 					h->reqflags |= FLAG_RANGE;
-					h->req_RangeStart = strtoll(p+6, &colon, 10);
-					h->req_RangeEnd = colon ? atoll(colon+1) : 0;
+					h->req_RangeStart = (my_off_t)strtoll(p+6, &colon, 10);
+					h->req_RangeEnd = colon ? (my_off_t)atoll(colon+1) : 0;
 					DPRINTF(E_DEBUG, L_HTTP, "Range Start-End: %lld - %lld\n",
 						(long long)h->req_RangeStart,
 						h->req_RangeEnd ? (long long)h->req_RangeEnd : -1);
@@ -268,14 +285,14 @@ ParseHttpHeaders(struct upnphttp * h)
 				p = colon + 1;
 				while(isspace(*p))
 					p++;
-				for(n = 0; n<n_lan_addr; n++)
+				for(n = 0; n < n_lan_addr; n++)
 				{
-					for(i=0; lan_addr[n].str[i]; i++)
+					for(i = 0; lan_addr[n].str[i]; i++)
 					{
 						if(lan_addr[n].str[i] != p[i])
 							break;
 					}
-					if(!lan_addr[n].str[i])
+					if(i && !lan_addr[n].str[i])
 					{
 						h->iface = n;
 						break;
@@ -417,7 +434,7 @@ next_header:
 	}
 	if( h->reqflags & FLAG_CHUNKED )
 	{
-		char *endptr;
+		char *endptr = NULL;
 		h->req_chunklen = -1;
 		if( h->req_buflen <= h->req_contentoff )
 			return;
@@ -1074,7 +1091,8 @@ Process_upnphttp(struct upnphttp * h)
 				h->state = 100;
 				break;
 			}
-			h->req_buf = (char *)realloc(h->req_buf, new_req_buflen);
+			char* aa = h->req_buf;
+			h->req_buf = (char *)realloc(aa, new_req_buflen);
 			if (!h->req_buf)
 			{
 				DPRINTF(E_ERROR, L_HTTP, "Receive headers: %s\n", strerror(errno));
@@ -1111,7 +1129,8 @@ Process_upnphttp(struct upnphttp * h)
 		{
 			buf[sizeof(buf)-1] = '\0';
 			/*fwrite(buf, 1, n, stdout);*/	/* debug */
-			h->req_buf = (char *)realloc(h->req_buf, n + h->req_buflen);
+			char* aa = h->req_buf;
+			h->req_buf = (char *)realloc(aa, n + h->req_buflen);
 			if (!h->req_buf)
 			{
 				DPRINTF(E_ERROR, L_HTTP, "Receive request body: %s\n", strerror(errno));
@@ -1260,13 +1279,14 @@ send_data(struct upnphttp * h, char * header, size_t size, int flags)
 }
 
 static void
-send_file(struct upnphttp * h, int sendfd, off_t offset, off_t end_offset)
+send_file(struct upnphttp * h, FILE* sendfd, my_off_t offset, my_off_t  end_offset)
 {
-	off_t send_size;
-	off_t ret;
+	my_off_t send_size;
+	my_off_t ret;
 	char *buf = NULL;
 #if HAVE_SENDFILE
-	int try_sendfile = 1;
+	int file_descriptor = fileno(sendfd);
+	int try_sendfile = file_descriptor != -1;
 #endif
 
 	while( offset <= end_offset )
@@ -1275,7 +1295,7 @@ send_file(struct upnphttp * h, int sendfd, off_t offset, off_t end_offset)
 		if( try_sendfile )
 		{
 			send_size = ( ((end_offset - offset) < MAX_BUFFER_SIZE) ? (end_offset - offset + 1) : MAX_BUFFER_SIZE);
-			ret = sys_sendfile(h->socket, sendfd, &offset, send_size);
+			ret = sys_sendfile(h->socket, file_descriptor, &offset, send_size);
 			if( ret == -1 )
 			{
 				DPRINTF(E_DEBUG, L_HTTP, "sendfile error :: error no. %d [%s]\n", errno, strerror(errno));
@@ -1296,8 +1316,8 @@ send_file(struct upnphttp * h, int sendfd, off_t offset, off_t end_offset)
 		if( !buf )
 			buf = malloc(MIN_BUFFER_SIZE);
 		send_size = (((end_offset - offset) < MIN_BUFFER_SIZE) ? (end_offset - offset + 1) : MIN_BUFFER_SIZE);
-		lseek(sendfd, offset, SEEK_SET);
-		ret = read(sendfd, buf, send_size);
+		fseeko(sendfd, offset, SEEK_SET);
+		ret = fread(buf, 1, send_size, sendfd);
 		if( ret == -1 ) {
 			DPRINTF(E_DEBUG, L_HTTP, "read error :: error no. %d [%s]\n", errno, strerror(errno));
 			if( errno == EAGAIN )
@@ -1305,7 +1325,9 @@ send_file(struct upnphttp * h, int sendfd, off_t offset, off_t end_offset)
 			else
 				break;
 		}
-		ret = write(h->socket, buf, ret);
+		if(ret == 0)
+			continue;
+		ret = send(h->socket, buf, ret, 0);
 		if( ret == -1 ) {
 			DPRINTF(E_DEBUG, L_HTTP, "write error :: error no. %d [%s]\n", errno, strerror(errno));
 			if( errno == EAGAIN )
@@ -1338,16 +1360,19 @@ start_dlna_header(struct string_s *str, int respcode, const char *tmode, const c
 }
 
 static int
-_open_file(const char *orig_path)
+_open_file(const char *orig_path, FILE** ret)
 {
 	struct media_dir_s *media_path;
 	char buf[PATH_MAX];
 	const char *path;
-	int fd;
 
 	if (!GETFLAG(WIDE_LINKS_MASK))
 	{
+#ifdef _WIN32
+		path = _fullpath(buf, orig_path, PATH_MAX);
+#else
 		path = realpath(orig_path, buf);
+#endif
 		if (!path)
 		{
 			DPRINTF(E_ERROR, L_HTTP, "Error resolving path %s: %s\n",
@@ -1370,11 +1395,11 @@ _open_file(const char *orig_path)
 	else
 		path = orig_path;
 
-	fd = open(path, O_RDONLY);
-	if (fd < 0)
+	*ret = my_fopen(path, "rb");
+	if (*ret == NULL)
 		DPRINTF(E_ERROR, L_HTTP, "Error opening %s\n", path);
 
-	return fd;
+	return *ret == NULL ? -1 : 0;
 }
 
 static void
@@ -1439,9 +1464,9 @@ SendResp_albumArt(struct upnphttp * h, char * object)
 {
 	char header[512];
 	char *path;
-	off_t size;
+	my_off_t size;
 	long long id;
-	int fd;
+	FILE* fd;
 	struct string_s str;
 
 	if( h->reqflags & (FLAG_XFERSTREAMING|FLAG_RANGE) )
@@ -1462,18 +1487,19 @@ SendResp_albumArt(struct upnphttp * h, char * object)
 	}
 	DPRINTF(E_INFO, L_HTTP, "Serving album art ID: %lld [%s]\n", id, path);
 
-	fd = _open_file(path);
-	if( fd < 0 ) {
+	int error = _open_file(path, &fd);
+	if(error < 0 ) {
 		sqlite3_free(path);
-		if (fd == -403)
+		if (error == -403)
 			Send403(h);
 		else
 			Send404(h);
 		return;
 	}
 	sqlite3_free(path);
-	size = lseek(fd, 0, SEEK_END);
-	lseek(fd, 0, SEEK_SET);
+	fseek(fd, 0, SEEK_END);
+	size = ftello(fd);
+	fseek(fd, 0, SEEK_SET);
 
 	INIT_STR(str, header);
 
@@ -1487,7 +1513,7 @@ SendResp_albumArt(struct upnphttp * h, char * object)
 		if( h->req_command != EHead )
 			send_file(h, fd, 0, size-1);
 	}
-	close(fd);
+	fclose(fd);
 	CloseSocket_upnphttp(h);
 }
 
@@ -1496,9 +1522,9 @@ SendResp_caption(struct upnphttp * h, char * object)
 {
 	char header[512];
 	char *path;
-	off_t size;
+	my_off_t size;
 	long long id;
-	int fd;
+	FILE* fd;
 	struct string_s str;
 
 	id = strtoll(object, NULL, 10);
@@ -1512,18 +1538,19 @@ SendResp_caption(struct upnphttp * h, char * object)
 	}
 	DPRINTF(E_INFO, L_HTTP, "Serving caption ID: %lld [%s]\n", id, path);
 
-	fd = _open_file(path);
-	if( fd < 0 ) {
+	int error = _open_file(path, &fd);
+	if( error < 0 ) {
 		sqlite3_free(path);
-		if (fd == -403)
+		if (error == -403)
 			Send403(h);
 		else
 			Send404(h);
 		return;
 	}
 	sqlite3_free(path);
-	size = lseek(fd, 0, SEEK_END);
-	lseek(fd, 0, SEEK_SET);
+	fseek(fd, 0, SEEK_END);
+	size = ftello(fd);
+	fseek(fd, 0, SEEK_SET);
 
 	INIT_STR(str, header);
 
@@ -1535,7 +1562,7 @@ SendResp_caption(struct upnphttp * h, char * object)
 		if( h->req_command != EHead )
 			send_file(h, fd, 0, size-1);
 	}
-	close(fd);
+	fclose(fd);
 	CloseSocket_upnphttp(h);
 }
 
@@ -1566,7 +1593,7 @@ SendResp_thumbnail(struct upnphttp * h, char * object)
 	}
 	DPRINTF(E_INFO, L_HTTP, "Serving thumbnail for ObjectId: %lld [%s]\n", id, path);
 
-	if( access(path, F_OK) != 0 )
+	if( my_access(path, F_OK) != 0 )
 	{
 		DPRINTF(E_ERROR, L_HTTP, "Error accessing %s\n", path);
 		Send404(h);
@@ -1642,7 +1669,7 @@ SendResp_resizedimg(struct upnphttp * h, char * object)
 		resolution = result[4];
 		rotate = result[5] ? atoi(result[5]) : 0;
 	}
-	if( !file_path || !resolution || (access(file_path, F_OK) != 0) )
+	if( !file_path || !resolution || (my_access(file_path, F_OK) != 0) )
 	{
 		DPRINTF(E_WARN, L_HTTP, "%s not found, responding ERROR 404\n", object);
 		sqlite3_free_table(result);
@@ -1761,7 +1788,13 @@ SendResp_resizedimg(struct upnphttp * h, char * object)
 	INIT_STR(str, header);
 
 #if USE_FORK
-	if( (h->reqflags & FLAG_XFERBACKGROUND) && (setpriority(PRIO_PROCESS, 0, 19) == 0) )
+	if((h->reqflags & FLAG_XFERBACKGROUND) &&
+#ifdef _WIN32
+	(SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST) != 0)
+#else
+	   (setpriority(PRIO_PROCESS, 0, 19) == 0)
+#endif
+	   )
 		tmode = "Background";
 	else
 #endif
@@ -1842,9 +1875,9 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 	char buf[128];
 	char **result;
 	int rows, ret;
-	off_t total, offset, size;
+	my_off_t total, offset, size;
 	int64_t id;
-	int sendfh;
+	FILE* sendfh;
 	uint32_t dlna_flags = DLNA_FLAG_DLNA_V1_5|DLNA_FLAG_HTTP_STALLING|DLNA_FLAG_TM_B;
 	uint32_t cflags = h->req_client ? h->req_client->type->flags : 0;
 	const char *tmode;
@@ -1854,6 +1887,9 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 	                char path[PATH_MAX];
 	                char mime[32];
 	                char dlna[96];
+#ifdef __CYGWIN__
+	                int caption_exist;
+#endif  // __CYGWIN__
 	              } last_file = { 0, 0 };
 #if USE_FORK
 	pid_t newpid = 0;
@@ -1925,6 +1961,10 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 			last_file.dlna[0] = '\0';
 		sqlite3_free_table(result);
 	}
+#ifdef __CYGWIN__
+	if( h->reqflags & FLAG_CAPTION )
+		last_file.caption_exist = sql_get_int_field(db, "SELECT ID from CAPTIONS where ID = '%lld'", (long long)id);
+#endif  // __CYGWIN__
 #if USE_FORK
 	newpid = process_fork(h->req_client);
 	if( newpid > 0 )
@@ -1967,21 +2007,28 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 	}
 
 	offset = h->req_RangeStart;
-	sendfh = _open_file(last_file.path);
-	if( sendfh < 0 ) {
-		if (sendfh == -403)
+	int err = _open_file(last_file.path, &sendfh);
+	if(err < 0 ) {
+		if (err == -403)
 			Send403(h);
 		else
 			Send404(h);
 		goto error;
 	}
-	size = lseek(sendfh, 0, SEEK_END);
-	lseek(sendfh, 0, SEEK_SET);
+	fseek(sendfh, 0, SEEK_END);
+	size = ftello(sendfh);
+	fseek(sendfh, 0, SEEK_SET);
 
 	INIT_STR(str, header);
 
 #if USE_FORK
-	if( (h->reqflags & FLAG_XFERBACKGROUND) && (setpriority(PRIO_PROCESS, 0, 19) == 0) )
+	if( (h->reqflags & FLAG_XFERBACKGROUND) && 
+#ifdef _WIN32
+	   (SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST) != 0)
+#else
+	   (setpriority(PRIO_PROCESS, 0, 19) == 0)
+#endif
+	   )
 		tmode = "Background";
 	else
 #endif
@@ -2002,14 +2049,14 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 		{
 			DPRINTF(E_WARN, L_HTTP, "Specified range was invalid!\n");
 			Send400(h);
-			close(sendfh);
+			fclose(sendfh);
 			goto error;
 		}
 		if( h->req_RangeEnd >= size )
 		{
 			DPRINTF(E_WARN, L_HTTP, "Specified range was outside file boundaries!\n");
 			Send416(h);
-			close(sendfh);
+			fclose(sendfh);
 			goto error;
 		}
 
@@ -2040,7 +2087,11 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 
 	if( h->reqflags & FLAG_CAPTION )
 	{
+#ifndef __CYGWIN__
 		if( sql_get_int_field(db, "SELECT ID from CAPTIONS where ID = '%lld'", (long long)id) > 0 )
+#else  // __CYGWIN__
+		if( last_file.caption_exist )
+#endif  // __CYGWIN__
 			strcatf(&str, "CaptionInfo.sec: http://%s:%d/Captions/%lld.srt\r\n",
 			              lan_addr[h->iface].str, runtime_vars.port, (long long)id);
 	}
@@ -2055,7 +2106,7 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 		if( h->req_command != EHead )
 			send_file(h, sendfh, offset, h->req_RangeEnd);
 	}
-	close(sendfh);
+	fclose(sendfh);
 
 	CloseSocket_upnphttp(h);
 error:

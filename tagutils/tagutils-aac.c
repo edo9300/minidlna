@@ -67,7 +67,7 @@ _get_aactags(char *file, struct song_metadata *psong)
 	long atom_offset;
 	unsigned int atom_length;
 
-	long current_offset = 0;
+	unsigned long current_offset = 0;
 	int current_size;
 	char current_atom[4];
 	char *current_data = NULL;
@@ -177,11 +177,11 @@ _get_aactags(char *file, struct song_metadata *psong)
 }
 
 // aac_lookforatom
-static off_t
+static my_off_t
 _aac_lookforatom(FILE *aac_fp, char *atom_path, unsigned int *atom_length)
 {
 	long atom_offset;
-	off_t file_size;
+	my_off_t file_size;
 	char *cur_p, *end_p;
 	char atom_name[5];
 

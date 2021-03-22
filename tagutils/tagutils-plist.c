@@ -25,7 +25,7 @@
 #include <ctype.h>
 
 #include "tagutils.h"
-#include "log.h"
+#include "../log.h"
 
 
 #define MAX_BUF 4096
@@ -34,11 +34,11 @@ static FILE *fp = 0;
 static int _utf8bom = 0;
 static int _trackno;
 
-static int (*_next_track)(struct song_metadata*, struct stat*, char*, char*);
-static int _m3u_pls_next_track(struct song_metadata*, struct stat*, char*, char*);
+static int (*_next_track)(struct song_metadata*, struct my_stat*, char*, char*);
+static int _m3u_pls_next_track(struct song_metadata*, struct my_stat*, char*, char*);
 
 int
-start_plist(const char *path, struct song_metadata *psong, struct stat *stat, char *lang, char *type)
+start_plist(const char *path, struct song_metadata *psong, struct my_stat*stat, char *lang, char *type)
 {
 	char *fname, *suffix;
 
@@ -89,7 +89,7 @@ start_plist(const char *path, struct song_metadata *psong, struct stat *stat, ch
 }
 
 int
-_m3u_pls_next_track(struct song_metadata *psong, struct stat *stat, char *lang, char *type)
+_m3u_pls_next_track(struct song_metadata *psong, struct my_stat *stat, char *lang, char *type)
 {
 	char buf[MAX_BUF], *p;
 	int len;
@@ -164,7 +164,7 @@ next_line:
 }
 
 int
-next_plist_track(struct song_metadata *psong, struct stat *stat, char *lang, char *type)
+next_plist_track(struct song_metadata *psong, struct my_stat *stat, char *lang, char *type)
 {
 	if(_next_track)
 		return _next_track(psong, stat, lang, type);

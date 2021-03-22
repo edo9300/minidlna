@@ -21,7 +21,7 @@
 
 /* This file is derived from mt-daapd project */
 
-#include "config.h"
+#include "../config.h"
 #include <ctype.h>
 #include <errno.h>
 #include <id3tag.h>
@@ -29,10 +29,12 @@
 #include <stddef.h>
 #include <string.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <time.h>
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/time.h>
 #include <netinet/in.h>
+#endif
 #ifdef HAVE_VORBISFILE
 #include <ogg/ogg.h>
 #include <vorbis/codec.h>
@@ -48,12 +50,28 @@
 #include "../utils.h"
 #include "../log.h"
 
+#ifdef _WIN32
+#include <io.h>
+#else
+#endif
+
+#ifdef _MSC_VER
+#define PACK_PUSH __pragma(pack(push,1))
+#define __PACKED__ 
+#define PACK_POP __pragma(pack(pop))
+#else
+#define PACK_PUSH
+#define __PACKED__  __attribute__((packed))
+#define PACK_POP
+#endif
+PACK_PUSH
 struct id3header {
 	unsigned char id[3];
 	unsigned char version[2];
 	unsigned char flags;
 	unsigned char size[4];
-} __attribute((packed));
+} __PACKED__;
+PACK_POP
 
 char *winamp_genre[] = {
 	/*00*/ "Blues",             "Classic Rock",     "Country",           "Dance",
@@ -267,7 +285,7 @@ _get_tags(char *file, struct song_metadata *psong)
 /*****************************************************************************/
 // readtags
 int
-readtags(char *path, struct song_metadata *psong, struct stat *stat, char *lang, char *type)
+readtags(char *path, struct song_metadata *psong, struct my_stat*stat, char *lang, char *type)
 {
 	char *fname;
 

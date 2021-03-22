@@ -21,11 +21,16 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
-#include <libgen.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifdef _WIN32
+#include <io.h>
+#define O_RDONLY 0
+#else
+#include <libgen.h>
+#include <unistd.h>
 #include <sys/param.h>
+#endif
 #include <fcntl.h>
 
 #include <libexif/exif-loader.h>
@@ -140,11 +145,11 @@ check_for_captions(const char *path, int64_t detailID)
 	}
 
 	strcpy(p, ".srt");
-	ret = access(file, R_OK);
+	ret = my_access(file, R_OK);
 	if (ret != 0)
 	{
 		strcpy(p, ".smi");
-		ret = access(file, R_OK);
+		ret = my_access(file, R_OK);
 	}
 
 	if (ret == 0)
@@ -162,11 +167,11 @@ parse_nfo(const char *path, metadata_t *m)
 	FILE *nfo;
 	char *buf;
 	struct NameValueParserData xml;
-	struct stat file;
+	struct my_stat file;
 	size_t nread;
 	char *val, *val2;
 
-	if (stat(path, &file) != 0 ||
+	if (my_stat(path, &file) != 0 ||
 	    file.st_size > 65535)
 	{
 		DPRINTF(E_INFO, L_METADATA, "Not parsing very large .nfo file %s\n", path);
@@ -176,7 +181,7 @@ parse_nfo(const char *path, metadata_t *m)
 	buf = calloc(1, file.st_size + 1);
 	if (!buf)
 		return;
-	nfo = fopen(path, "r");
+	nfo = my_fopen(path, "r");
 	if (!nfo)
 	{
 		free(buf);
@@ -281,7 +286,7 @@ GetFolderMetadata(const char *name, const char *path, const char *artist, const 
 	if( ret != SQLITE_OK )
 		ret = 0;
 	else
-		ret = sqlite3_last_insert_rowid(db);
+		ret = (int)sqlite3_last_insert_rowid(db);
 
 	return ret;
 }
@@ -291,7 +296,7 @@ GetAudioMetadata(const char *path, const char *name)
 {
 	char type[4];
 	static char lang[6] = { '\0' };
-	struct stat file;
+	struct my_stat file;
 	int64_t ret;
 	char *esc_tag;
 	int i;
@@ -301,7 +306,7 @@ GetAudioMetadata(const char *path, const char *name)
 	uint32_t free_flags = FLAG_MIME|FLAG_DURATION|FLAG_DLNA_PN|FLAG_DATE;
 	memset(&m, '\0', sizeof(metadata_t));
 
-	if ( stat(path, &file) != 0 )
+	if (my_stat(path, &file) != 0 )
 		return 0;
 
 	if( ends_with(path, ".mp3") )
@@ -493,6 +498,27 @@ libjpeg_error_handler(j_common_ptr cinfo)
 	return;
 }
 
+#ifdef _WIN32
+static char* strcasestr(const char* str, const char* pattern) {
+	size_t i;
+
+	if(!*pattern)
+		return (char*)str;
+
+	for(; *str; str++) {
+		if(toupper((unsigned char)*str) == toupper((unsigned char)*pattern)) {
+			for(i = 1;; i++) {
+				if(!pattern[i])
+					return (char*)str;
+				if(toupper((unsigned char)str[i]) != toupper((unsigned char)pattern[i]))
+					break;
+			}
+		}
+	}
+	return NULL;
+}
+#endif
+
 int64_t
 GetImageMetadata(const char *path, const char *name)
 {
@@ -505,7 +531,7 @@ GetImageMetadata(const char *path, const char *name)
 	int width=0, height=0, thumb=0;
 	char make[32], model[64] = {'\0'};
 	char b[1024];
-	struct stat file;
+	struct my_stat file;
 	int64_t ret;
 	image_s *imsrc;
 	metadata_t m;
@@ -513,7 +539,7 @@ GetImageMetadata(const char *path, const char *name)
 	memset(&m, '\0', sizeof(metadata_t));
 
 	//DEBUG DPRINTF(E_DEBUG, L_METADATA, "Parsing %s...\n", path);
-	if ( stat(path, &file) != 0 )
+	if (my_stat(path, &file) != 0 )
 		return 0;
 	//DEBUG DPRINTF(E_DEBUG, L_METADATA, " * size: %jd\n", file.st_size);
 
@@ -607,7 +633,7 @@ no_exifdata:
 	/* If SOF parsing fails, then fall through to reading the JPEG data with libjpeg to get the resolution */
 	if( image_get_jpeg_resolution(path, &width, &height) != 0 || !width || !height )
 	{
-		infile = fopen(path, "r");
+		infile = my_fopen(path, "r");
 		if( infile )
 		{
 			cinfo.err = jpeg_std_error(&jerr);
@@ -666,7 +692,7 @@ no_exifdata:
 int64_t
 GetVideoMetadata(const char *path, const char *name)
 {
-	struct stat file;
+	struct my_stat file;
 	int ret, i;
 	struct tm *modtime;
 	AVFormatContext *ctx = NULL;
@@ -685,8 +711,11 @@ GetVideoMetadata(const char *path, const char *name)
 	memset(&video, '\0', sizeof(video));
 
 	//DEBUG DPRINTF(E_DEBUG, L_METADATA, "Parsing video %s...\n", name);
-	if ( stat(path, &file) != 0 )
+	if(my_stat(path, &file) != 0) {
+		DPRINTF(E_WARN, L_METADATA, "Unable to stat %s [%s]\n",
+				path, strerror(errno));
 		return 0;
+	}
 	//DEBUG DPRINTF(E_DEBUG, L_METADATA, " * size: %jd\n", file.st_size);
 
 	ret = lav_open(&ctx, path);
@@ -698,7 +727,7 @@ GetVideoMetadata(const char *path, const char *name)
 		return 0;
 	}
 	//dump_format(ctx, 0, NULL, 0);
-	for( i=0; i < ctx->nb_streams; i++)
+	for( i=0; (unsigned int)i < ctx->nb_streams; i++)
 	{
 		if( lav_codec_type(ctx->streams[i]) == AVMEDIA_TYPE_AUDIO &&
 		    audio_stream == -1 )
@@ -816,9 +845,9 @@ GetVideoMetadata(const char *path, const char *name)
 		DPRINTF(E_DEBUG, L_METADATA, "Container: '%s' [%s]\n", ctx->iformat->name, basepath);
 		xasprintf(&m.resolution, "%dx%d", lav_width(vstream), lav_height(vstream));
 		if( ctx->bit_rate > 8 )
-			m.bitrate = ctx->bit_rate / 8;
+			m.bitrate = (unsigned int)(ctx->bit_rate / 8);
 		if( ctx->duration > 0 )
-			m.duration = duration_str(ctx->duration / (AV_TIME_BASE/1000));
+			m.duration = duration_str((int)(ctx->duration / (AV_TIME_BASE/1000)));
 
 		/* NOTE: The DLNA spec only provides for ASF (WMV), TS, PS, and MP4 containers.
 		 * Skip DLNA parsing for everything else. */
@@ -947,8 +976,8 @@ GetVideoMetadata(const char *path, const char *name)
 					off += sprintf(m.dlna_pn+off, "TS_");
 					if (lav_sample_aspect_ratio(vstream).num) {
 						av_reduce(&display_aspect_ratio.num, &display_aspect_ratio.den,
-						          lav_width(vstream) * lav_sample_aspect_ratio(vstream).num,
-						          lav_height(vstream) * lav_sample_aspect_ratio(vstream).den,
+								  (int64_t)lav_width(vstream) * (int64_t)lav_sample_aspect_ratio(vstream).num,
+								  (int64_t)lav_height(vstream) * (int64_t)lav_sample_aspect_ratio(vstream).den,
 						          1024*1024);
 					}
 					fps = lav_get_fps(vstream);
@@ -1499,7 +1528,7 @@ video_no_dlna:
 	if( ext )
 	{
 		strcpy(ext+1, "nfo");
-		if( access(nfo, F_OK) == 0 )
+		if( my_access(nfo, F_OK) == 0 )
 		{
 			parse_nfo(nfo, &m);
 		}
@@ -1559,7 +1588,7 @@ video_no_dlna:
 	}
 	else
 	{
-		ret = sqlite3_last_insert_rowid(db);
+		ret = (int)sqlite3_last_insert_rowid(db);
 		check_for_captions(path, ret);
 	}
 	free_metadata(&m, free_flags);

@@ -49,11 +49,16 @@
 #ifndef __UPNPHTTP_H__
 #define __UPNPHTTP_H__
 
+#ifdef _WIN32
+#include <sys/types.h>
+#else
 #include <netinet/in.h>
-#include <sys/queue.h>
+#endif
+#include "queue.h"
 
 #include "minidlnatypes.h"
 #include "config.h"
+#include "utils.h"
 
 /* server: HTTP header returned in all HTTP responses : */
 #define MINIDLNA_SERVER_STRING	OS_VERSION " DLNADOC/1.50 UPnP/1.0 " SERVER_NAME "/" MINIDLNA_VERSION
@@ -96,8 +101,8 @@ struct upnphttp {
 	int req_Timeout;
 	const char * req_SID;		/* For UNSUBSCRIBE */
 	int req_SIDLen;
-	off_t req_RangeStart;
-	off_t req_RangeEnd;
+	my_off_t req_RangeStart;
+	my_off_t req_RangeEnd;
 	long int req_chunklen;
 	uint32_t reqflags;
 	/* response */

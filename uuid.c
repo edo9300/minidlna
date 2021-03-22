@@ -28,10 +28,18 @@
 #include <stdlib.h>
 #include <time.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <string.h>
+#ifdef _WIN32
+#include <stdint.h>
+#define TIMEVAL_TO_TIMESPEC(tv, ts) {                                   \
+        (ts)->tv_sec = (tv)->tv_sec;                                    \
+        (ts)->tv_nsec = (tv)->tv_usec * 1000;                           \
+}
+#else
+#include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/time.h>
+#endif
 #include <errno.h>
 #if HAVE_MACH_MACH_TIME_H
 #include <mach/mach_time.h>
@@ -39,6 +47,7 @@
 #include <sys/syscall.h>
 #endif
 
+#include "utils.h"
 #include "uuid.h"
 #include "getifaddr.h"
 #include "log.h"
@@ -78,7 +87,7 @@ read_bootid_node(unsigned char *buf, size_t size)
 	if(size != 6)
 		return -1;
 
-	boot_id = fopen("/proc/sys/kernel/random/boot_id", "r");
+	boot_id = my_fopen("/proc/sys/kernel/random/boot_id", "r");
 	if(!boot_id)
 		return -1;
 	if((fseek(boot_id, 24, SEEK_SET) < 0) ||
@@ -96,6 +105,12 @@ read_bootid_node(unsigned char *buf, size_t size)
 static void
 read_random_bytes(unsigned char *buf, size_t size)
 {
+#ifdef _WIN32
+	unsigned int i;
+	srand((unsigned int)monotonic_us());
+	for(i = 0; i < size; i++)
+		buf[i] ^= rand() >> 5;
+#else
 	int i;
 	pid_t pid;
 
@@ -120,6 +135,7 @@ read_random_bytes(unsigned char *buf, size_t size)
 		srand(pid);
 		pid = 0;
 	}
+#endif
 }
 
 void
@@ -146,10 +162,13 @@ generate_uuid(unsigned char uuid_out[16])
 
 	unsigned char mac[6];
 	int mac_error;
+	(void)mac_error;
 
 	memset(&mac, '\0', sizeof(mac));
 	/* Get the spatially unique node identifier */
-
+#ifdef _WIN32
+	read_random_bytes(&uuid_out[10], 6);
+#else
 	mac_error = getsyshwaddr((char *)mac, sizeof(mac));
 
 	if(!mac_error)
@@ -166,6 +185,7 @@ generate_uuid(unsigned char uuid_out[16])
 			read_random_bytes(&uuid_out[10], 6);
 		}
 	}
+#endif
 
 	if(memcmp(last_node, uuid_out+10, 6) != 0)
 	{

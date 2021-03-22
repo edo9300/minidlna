@@ -51,15 +51,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <ctype.h>
+
+#ifdef _WIN32
+#define MAX max
+#else
 #include <sys/socket.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include <ctype.h>
+#endif
 
 #include "upnpglobalvars.h"
 #include "utils.h"
@@ -398,6 +403,7 @@ GetCurrentConnectionInfo(struct upnphttp * h, const char * action)
 /* Vendor-specific filter flags */
 #define FILTER_SEC_CAPTION_INFO_EX		0x04000000
 #define FILTER_SEC_DCM_INFO			0x08000000
+#define FILTER_SEC				0x0C000000
 #define FILTER_PV_SUBTITLE_FILE_TYPE		0x10000000
 #define FILTER_PV_SUBTITLE_FILE_URI		0x20000000
 #define FILTER_PV_SUBTITLE			0x30000000
@@ -584,7 +590,7 @@ static char *
 parse_sort_criteria(char *sortCriteria, int *error)
 {
 	char *order = NULL;
-	char *item, *saveptr;
+	char *item, *saveptr = NULL;
 	int i, ret, reverse, title_sorted = 0;
 	struct string_s str;
 	*error = 0;
@@ -806,7 +812,8 @@ callback(void *args, int argc, char **argv, char **azColName)
 		if( (str->size+DEFAULT_RESP_SIZE) <= MAX_RESPONSE_SIZE )
 		{
 #endif
-			str->data = realloc(str->data, (str->size+DEFAULT_RESP_SIZE));
+			char* data = str->data;
+			str->data = realloc(data, (str->size+DEFAULT_RESP_SIZE));
 			if( str->data )
 			{
 				str->size += DEFAULT_RESP_SIZE;
@@ -1290,6 +1297,8 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 	}
 
 	str.data = malloc(DEFAULT_RESP_SIZE);
+	if(!str.data)
+		return;
 	str.size = DEFAULT_RESP_SIZE;
 	str.off = sprintf(str.data, "%s", resp0);
 	/* See if we need to include DLNA namespace reference */
@@ -1299,6 +1308,8 @@ BrowseContentDirectory(struct upnphttp * h, const char * action)
 		ret = strcatf(&str, DLNA_NAMESPACE);
 	if( args.filter & FILTER_PV_SUBTITLE )
 		ret = strcatf(&str, PV_NAMESPACE);
+	if( args.filter & FILTER_SEC )
+		ret = strcatf(&str, SEC_NAMESPACE);
 	strcatf(&str, "&gt;\n");
 
 	args.returned = 0;
@@ -1766,6 +1777,8 @@ SearchContentDirectory(struct upnphttp * h, const char * action)
 	}
 
 	str.data = malloc(DEFAULT_RESP_SIZE);
+	if(!str.data)
+		return;
 	str.size = DEFAULT_RESP_SIZE;
 	str.off = sprintf(str.data, "%s", resp0);
 	/* See if we need to include DLNA namespace reference */

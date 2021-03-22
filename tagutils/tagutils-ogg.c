@@ -202,9 +202,9 @@ _ogg_vorbis_end(ogg_stream_processor *stream, struct song_metadata *psong)
 	{
 		if(psong->bitrate <= 0)
 		{
-			psong->bitrate = bitrate * 1000;
+			psong->bitrate = (int)(bitrate * 1000);
 		}
-		psong->song_length = time * 1000;
+		psong->song_length = (int)(time * 1000);
 	}
 
 	vorbis_comment_clear(&inf->vc);

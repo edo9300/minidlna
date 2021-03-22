@@ -50,18 +50,23 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/queue.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <time.h>
 #include <sys/types.h>
+#ifdef _WIN32
+#include <WinSock2.h>
+#include <ws2tcpip.h>
+#else
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/param.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
 #include <fcntl.h>
 #include <errno.h>
 
+#include "queue.h"
 #include "upnpevents.h"
 #include "minidlnapath.h"
 #include "upnpglobalvars.h"
@@ -121,6 +126,8 @@ newSubscriber(const char * eventurl, const char * callback, int callbacklen)
 	if(!eventurl || !callback || !callbacklen)
 		return NULL;
 	tmp = calloc(1, sizeof(struct subscriber)+callbacklen+1);
+	if(!tmp)
+		return NULL;
 	if(strcmp(eventurl, CONTENTDIRECTORY_EVENTURL)==0)
 		tmp->service = EContentDirectory;
 	else if(strcmp(eventurl, CONNECTIONMGR_EVENTURL)==0)
@@ -138,7 +145,7 @@ newSubscriber(const char * eventurl, const char * callback, int callbacklen)
 	if( get_uuid_string(tmp->uuid+5) != 0 )
 	{
 		tmp->uuid[sizeof(tmp->uuid)-1] = '\0';
-		snprintf(tmp->uuid+37, 5, "%04lx", random() & 0xffff);
+		snprintf(tmp->uuid+37, 5, "%04lx", rand() & 0xffff);
 	}
 
 	return tmp;
@@ -229,7 +236,6 @@ static void
 upnp_event_create_notify(struct subscriber * sub)
 {
 	struct upnp_event_notify * obj;
-	int flags;
 	obj = calloc(1, sizeof(struct upnp_event_notify));
 	if(!obj) {
 		DPRINTF(E_ERROR, L_HTTP, "%s: calloc(): %s\n", "upnp_event_create_notify", strerror(errno));
@@ -242,6 +248,15 @@ upnp_event_create_notify(struct subscriber * sub)
 		DPRINTF(E_ERROR, L_HTTP, "%s: socket(): %s\n", "upnp_event_create_notify", strerror(errno));
 		goto error;
 	}
+#ifdef _WIN32
+	unsigned long nonblocking = 1;
+	if(ioctlsocket(obj->s, FIONBIO, &nonblocking) == SOCKET_ERROR) {
+		DPRINTF(E_ERROR, L_HTTP, "%s: ioctlsocket(%d, FIONBIO, &%lu)",
+				"upnp_event_create_notify", (int)obj->s, (unsigned long)nonblocking);
+		goto error;
+	}
+#else
+	int flags;
 	if((flags = fcntl(obj->s, F_GETFL, 0)) < 0) {
 		DPRINTF(E_ERROR, L_HTTP, "%s: fcntl(..F_GETFL..): %s\n",
 		       "upnp_event_create_notify", strerror(errno));
@@ -252,13 +267,19 @@ upnp_event_create_notify(struct subscriber * sub)
 		       "upnp_event_create_notify", strerror(errno));
 		goto error;
 	}
+#endif
 	if(sub)
 		sub->notify = obj;
 	LIST_INSERT_HEAD(&notifylist, obj, entries);
 	return;
 error:
-	if(obj->s >= 0)
+	if(obj->s >= 0) {
+#ifdef _WIN32
+		closesocket(obj->s);
+#else
 		close(obj->s);
+#endif
+	}
 	free(obj);
 }
 
@@ -300,7 +321,6 @@ upnp_event_notify_connect(struct upnp_event_notify * obj)
 		obj->path = p;
 	else
 		obj->path = "/";
-	addr.sin_family = AF_INET;
 	inet_aton(obj->addrstr, &addr.sin_addr);
 	addr.sin_port = htons(port);
 	DPRINTF(E_DEBUG, L_HTTP, "%s: '%s' %hu '%s'\n", "upnp_event_notify_connect",
@@ -412,7 +432,11 @@ upnp_event_process_notify(struct upnp_event_notify * obj)
 		upnp_event_recv(obj);
 		break;
 	case EFinished:
+#ifdef _WIN32
+		closesocket(obj->s);
+#else
 		close(obj->s);
+#endif
 		obj->s = -1;
 		break;
 	default:
@@ -471,7 +495,11 @@ void upnpevents_processfds(fd_set *readset, fd_set *writeset)
 		next = obj->entries.le_next;
 		if(obj->state == EError || obj->state == EFinished) {
 			if(obj->s >= 0) {
+#ifdef _WIN32
+				closesocket(obj->s);
+#else
 				close(obj->s);
+#endif
 			}
 			if(obj->sub)
 				obj->sub->notify = NULL;

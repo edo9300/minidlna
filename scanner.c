@@ -18,15 +18,28 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <locale.h>
+#include <inttypes.h>
+#ifdef _WIN32
+#include "dirent.h"
+#include <io.h>
+static char* normalize_path(char* str) {
+	char* current_pos = strchr(str, '\\');
+	while(current_pos) {
+		*current_pos = '/';
+		current_pos = strchr(current_pos, '\\');
+	}
+	return str;
+}
+#else
 #include <unistd.h>
 #include <dirent.h>
-#include <locale.h>
 #include <libgen.h>
-#include <inttypes.h>
 #include <sys/param.h>
-#include <sys/stat.h>
-#include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/time.h>
+#endif
+#include <sys/stat.h>
 
 #include "config.h"
 
@@ -449,7 +462,7 @@ insert_directory(const char *name, const char *path, const char *base, const cha
 int
 insert_file(const char *name, const char *path, const char *parentID, int object, media_types types)
 {
-	const char *class;
+	const char *class = "";
 	char objectID[64];
 	int64_t detailID = 0;
 	char base[8];
@@ -721,7 +734,7 @@ filter_avp(scan_filter *d)
 static void
 ScanDirectory(const char *dir, const char *parent, media_types dir_types)
 {
-	struct dirent **namelist;
+	struct dirent **namelist = NULL;
 	int i, n, startID = 0;
 	char *full_path;
 	char *name = NULL;
@@ -773,7 +786,7 @@ ScanDirectory(const char *dir, const char *parent, media_types dir_types)
 
 	if( !parent )
 	{
-		startID = get_next_available_id("OBJECTS", BROWSEDIR_ID);
+		startID = (int)get_next_available_id("OBJECTS", BROWSEDIR_ID);
 	}
 
 	for (i=0; i < n; i++)
@@ -797,7 +810,7 @@ ScanDirectory(const char *dir, const char *parent, media_types dir_types)
 		{
 			type = resolve_unknown_type(full_path, dir_types);
 		}
-		if( (type == TYPE_DIR) && (access(full_path, R_OK|X_OK) == 0) )
+		if( (type == TYPE_DIR) && (my_access(full_path, 0) == 0) )
 		{
 			char *parent_id;
 			insert_directory(name, full_path, BROWSEDIR_ID, THISORNUL(parent), i+startID);
@@ -805,7 +818,7 @@ ScanDirectory(const char *dir, const char *parent, media_types dir_types)
 			ScanDirectory(full_path, parent_id, dir_types);
 			free(parent_id);
 		}
-		else if( type == TYPE_FILE && (access(full_path, R_OK) == 0) )
+		else if( type == TYPE_FILE && (my_access(full_path, R_OK) == 0) )
 		{
 			if( insert_file(name, full_path, THISORNUL(parent), i+startID, dir_types) == 0 )
 				fileno++;
@@ -829,7 +842,7 @@ cb_orphans(void *args, int argc, char **argv, char **azColName)
 	const char *mime = argv[1];
 
 	/* If we can't access the path, remove it */
-	if (access(path, R_OK) != 0)
+	if (my_access(path, R_OK) != 0)
 	{
 		DPRINTF(E_DEBUG, L_SCANNER, "Removing %s [%s]\n", path, mime ? "file" : "dir");
 		if (mime)
@@ -876,6 +889,7 @@ start_rescan(void)
 	{
 		char path[MAXPATHLEN], buf[MAXPATHLEN];
 		strncpyt(path, media_path->path, sizeof(path));
+		normalize_path(path);
 		strncpyt(buf, media_path->path, sizeof(buf));
 		esc_name = escape_tag(basename(buf), 1);
 		monitor_insert_directory(0, esc_name, path);
@@ -897,15 +911,21 @@ start_scanner(void)
 	struct media_dir_s *media_path;
 	char path[MAXPATHLEN];
 
+#ifdef _WIN32
+	if(SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) == 0)
+#else
 	if (setpriority(PRIO_PROCESS, 0, 15) == -1)
-		DPRINTF(E_WARN, L_INOTIFY,  "Failed to reduce scanner thread priority\n");
+#endif
+		DPRINTF(E_WARN, L_INOTIFY, "Failed to reduce scanner thread priority\n");
 
 	setlocale(LC_COLLATE, "");
 	av_register_all();
 	av_log_set_level(AV_LOG_PANIC);
 
-	if( GETFLAG(RESCAN_MASK) )
-		return start_rescan();
+	if(GETFLAG(RESCAN_MASK)) {
+		start_rescan();
+		return;
+	}
 
 	for( media_path = media_dirs; media_path != NULL; media_path = media_path->next )
 	{
@@ -917,7 +937,7 @@ start_scanner(void)
 		/* If there are multiple media locations, add a level to the ContentDirectory */
 		if( !GETFLAG(MERGE_MEDIA_DIRS_MASK) && media_dirs->next )
 		{
-			int startID = get_next_available_id("OBJECTS", BROWSEDIR_ID);
+			int startID = (int)get_next_available_id("OBJECTS", BROWSEDIR_ID);
 			id = insert_directory(bname, path, BROWSEDIR_ID, "", startID);
 			sprintf(buf, "$%X", startID);
 			parent = buf;

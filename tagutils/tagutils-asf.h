@@ -20,24 +20,35 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-
-#define __PACKED__  __attribute__((packed))
-
+#ifdef _WIN32
+#include <stdint.h>
+#include <stdio.h>
+#undef DEFINE_GUID
+#define DEFINE_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
+        const GUID DECLSPEC_SELECTANY name \
+                = { l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } }
+#else
 #ifdef HAVE_MACHINE_ENDIAN_H
 #include <machine/endian.h>
 #else
 #include <endian.h>
 #endif
+#endif
+#ifdef _WIN32
 
+#else
+PACK_PUSH
 typedef struct _GUID {
 	uint32_t l;
 	uint16_t w[2];
 	uint8_t b[8];
 } __PACKED__ GUID;
+PACK_POP
 
 #define DEFINE_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
 	GUID name = { l, { w1, w2 }, { b1, b2, b3, b4, b5, b6, b7, b8 } }
 #define IsEqualGUID(rguid1, rguid2) (!memcmp(rguid1, rguid2, sizeof(GUID)))
+#endif
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 #define SWAP32(l) (l)
@@ -116,6 +127,8 @@ DEFINE_GUID(ASF_FormatTypeWave, SWAP32(0xC4C4C4D1), SWAP16(0x0049), SWAP16(0x4E2
 DEFINE_GUID(ASF_StreamBufferStream, SWAP32(0x3AFB65E2), SWAP16(0x47EF), SWAP16(0x40F2),
 	    0xAC, 0x2C, 0x70, 0xA9, 0x0D, 0x71, 0xD3, 0x43);
 
+#ifndef _WIN32
+PACK_PUSH
 typedef struct _BITMAPINFOHEADER {
 	uint32_t biSize;
 	int32_t biWidth;
@@ -129,7 +142,10 @@ typedef struct _BITMAPINFOHEADER {
 	uint32_t biClrUsed;
 	uint32_t biClrImportant;
 } __PACKED__ BITMAPINFOHEADER;
+PACK_POP
+#endif
 
+PACK_PUSH
 typedef struct _WAVEFORMATEX {
 	uint16_t wFormatTag;
 	uint16_t nChannels;
@@ -139,7 +155,9 @@ typedef struct _WAVEFORMATEX {
 	uint16_t wBitsPerSample;
 	uint16_t cbSize;
 } __PACKED__ WAVEFORMATEX;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_stream_object_t {
 	GUID ID;
 	uint64_t Size;
@@ -151,7 +169,9 @@ typedef struct _asf_stream_object_t {
 	uint16_t StreamNumber;
 	uint32_t Reserved;
 } __PACKED__ asf_stream_object_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_media_stream_t {
 	asf_stream_object_t Hdr;
 	GUID MajorType;
@@ -162,7 +182,9 @@ typedef struct _asf_media_stream_t {
 	GUID FormatType;
 	uint32_t FormatSize;
 } __PACKED__ asf_media_stream_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _avi_audio_format_t {
 	uint16_t wFormatTag;
 	uint16_t nChannels;
@@ -172,7 +194,9 @@ typedef struct _avi_audio_format_t {
 	uint16_t wBitsPerSample;
 	uint16_t cbSize;
 } __PACKED__ avi_audio_format_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_extended_stream_object_t {
 	GUID ID;
 	uint64_t Size;
@@ -192,25 +216,33 @@ typedef struct _asf_extended_stream_object_t {
 	uint16_t StreamNameCount;
 	uint16_t PayloadExtensionSystemCount;
 } __PACKED__ asf_extended_stream_object_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_stream_name_t {
 	uint16_t ID;
 	uint16_t Length;
 } __PACKED__ asf_stream_name_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_payload_extension_t {
 	GUID ID;
 	uint16_t Size;
 	uint32_t InfoLength;
 } __PACKED__ asf_payload_extension_t;
+PACK_POP
 
 
 
+PACK_PUSH
 typedef struct _asf_object_t {
 	GUID ID;
 	uint64_t Size;
 } __PACKED__ asf_object_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_codec_entry_t {
 	uint16_t Type;
 	uint16_t NameLen;
@@ -220,7 +252,9 @@ typedef struct _asf_codec_entry_t {
 	uint16_t InfoLen;
 	uint32_t Info;
 } __PACKED__ asf_codec_entry_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_codec_list_t {
 	GUID ID;
 	uint64_t Size;
@@ -229,7 +263,9 @@ typedef struct _asf_codec_list_t {
 	asf_codec_entry_t Entries[2];
 	asf_codec_entry_t VideoCodec;
 } __PACKED__ asf_codec_list_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_content_description_t {
 	GUID ID;
 	uint64_t Size;
@@ -244,7 +280,9 @@ typedef struct _asf_content_description_t {
 	uint32_t Description;
 	uint32_t Rating;
 } __PACKED__ asf_content_description_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_file_properties_t {
 	GUID ID;
 	uint64_t Size;
@@ -259,8 +297,14 @@ typedef struct _asf_file_properties_t {
 	uint32_t MinPacketSize;
 	uint32_t MaxPacketSize;
 	uint32_t MaxBitrate;
-} __PACKED__ asf_file_properties_t;
+} asf_file_properties_t;
+PACK_POP
+typedef struct score {
+	// No = 0 here
+	int iWins, iWins2, iTies;
+} score;
 
+PACK_PUSH
 typedef struct _asf_header_extension_t {
 	GUID ID;
 	uint64_t Size;
@@ -268,7 +312,9 @@ typedef struct _asf_header_extension_t {
 	uint16_t Reserved2;
 	uint32_t DataSize;
 } __PACKED__ asf_header_extension_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_video_stream_t {
 	asf_stream_object_t Hdr;
 	uint32_t Width;
@@ -278,12 +324,16 @@ typedef struct _asf_video_stream_t {
 	BITMAPINFOHEADER bmi;
 	uint8_t ebih[1];
 } __PACKED__ asf_video_stream_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_audio_stream_t {
 	asf_stream_object_t Hdr;
 	WAVEFORMATEX wfx;
 } __PACKED__ asf_audio_stream_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_payload_t {
 	uint8_t StreamNumber;
 	uint8_t MediaObjectNumber;
@@ -292,7 +342,9 @@ typedef struct _asf_payload_t {
 	uint32_t ReplicatedData[2];
 	uint32_t PayloadLength;
 } __PACKED__ asf_payload_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_packet_t {
 	uint8_t TypeFlags;
 	uint8_t ECFlags;
@@ -307,7 +359,9 @@ typedef struct _asf_packet_t {
 	uint8_t PayloadFlags;
 	asf_payload_t Payload;
 } __PACKED__ asf_packet_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_data_object_t {
 	GUID ID;
 	uint64_t Size;
@@ -315,12 +369,16 @@ typedef struct _asf_data_object_t {
 	uint64_t TotalPackets;
 	unsigned short Reserved;
 } __PACKED__ asf_data_object_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_padding_object_t {
 	GUID ID;
 	uint64_t Size;
 } __PACKED__ asf_padding_object_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_simple_index_object_t {
 	GUID ID;
 	uint64_t Size;
@@ -329,7 +387,9 @@ typedef struct _asf_simple_index_object_t {
 	uint32_t MaximumPacketCount;
 	uint32_t IndexEntriesCount;
 } __PACKED__ asf_simple_index_object_t;
+PACK_POP
 
+PACK_PUSH
 typedef struct _asf_header_object_t {
 	GUID ID;
 	uint64_t Size;
@@ -343,6 +403,7 @@ typedef struct _asf_header_object_t {
 	asf_codec_list_t CodecList;
 	asf_padding_object_t PaddingObject;
 } __PACKED__ asf_header_object_t;
+PACK_POP
 
 
 #define ASF_VT_UNICODE          (0)

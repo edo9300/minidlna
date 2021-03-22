@@ -26,6 +26,7 @@
 #include <time.h>
 
 #include "upnpglobalvars.h"
+#include "utils.h"
 #include "log.h"
 
 static FILE *log_fp = NULL;
@@ -69,8 +70,13 @@ int find_matching_name(const char* str, const char* names[]) {
 	const char* start = strpbrk(str, ",=");
 	int level, c = (start != NULL) ? start - str : strlen(str);
 	for (level = 0; names[level] != 0; level++) {
+#ifdef _WIN32
+		if(!(_strnicmp(names[level], str, c)))
+			return level;
+#else
 		if (!(strncasecmp(names[level], str, c)))
 			return level;
+#endif
 	}
 	return -1;
 }
@@ -120,7 +126,7 @@ log_init(const char *fname, const char *debug)
 	if (!fname)					// use default i.e. stdout
 		return 0;
 
-	if (!(fp = fopen(fname, "a")))
+	if (!(fp = my_fopen(fname, "a")))
 		return 1;
 	log_fp = fp;
 	return 0;

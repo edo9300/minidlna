@@ -21,7 +21,7 @@
  * with some ideas from Netatalk's Avahi implementation.
  */
 
-#include <config.h>
+#include "config.h"
 
 #if defined(TIVO_SUPPORT) && defined(HAVE_AVAHI)
 

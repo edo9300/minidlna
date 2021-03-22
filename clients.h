@@ -18,8 +18,12 @@
 #ifndef __CLIENTS_H__
 #define __CLIENTS_H__
 #include <stdint.h>
+#ifdef _WIN32
+#include <WinSock2.h>
+#else
 #include <sys/time.h>
 #include <netinet/in.h>
+#endif
 
 #define CLIENT_CACHE_SLOTS 25
 

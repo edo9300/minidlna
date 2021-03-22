@@ -91,7 +91,7 @@ readoptionsfile(const char * fname)
 	printf("Reading configuration from file %s\n", fname);
 #endif
 
-	if(!(hfile = fopen(fname, "r")))
+	if(!(hfile = my_fopen(fname, "r")))
 		return -1;
 
 	while(fgets(buffer, sizeof(buffer), hfile))

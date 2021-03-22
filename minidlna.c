@@ -47,27 +47,32 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <time.h>
+#include <signal.h>
+#include <errno.h>
+#include <limits.h>
+#ifdef _WIN32
+#define pid_t int
+#else
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <sys/file.h>
 #include <sys/time.h>
 #include <sys/param.h>
-#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <fcntl.h>
-#include <time.h>
-#include <signal.h>
-#include <errno.h>
 #include <pthread.h>
-#include <limits.h>
 #include <libgen.h>
 #include <pwd.h>
+#include <grp.h>
+#endif
 
 #include "config.h"
 
@@ -95,6 +100,25 @@
 #include "tivo_beacon.h"
 #include "tivo_utils.h"
 #include "avahi.h"
+#ifdef __CYGWIN__
+#include <sys/cygwin.h>
+#include <windows.h>
+#endif // __CYGWIN__
+#ifdef _WIN32
+#define __CYGWIN__
+#define WIN_PROFILE_SUPPORT
+#define STATIC
+#include <WinSock2.h>
+#define socklen_t int
+#define uid_t int
+#define gid_t int
+#include <windows.h>
+#include <io.h>
+#define MAX max
+#define close closesocket
+extern HANDLE hMutexHandle;
+#define kill(pid,...) TerminateProcess(pid, 0)
+#endif
 
 #if SQLITE_VERSION_NUMBER < 3005001
 # warning "Your SQLite3 library appears to be too old!  Please use 3.5.1 or newer."
@@ -120,7 +144,7 @@ OpenAndConfHTTPSocket(unsigned short port)
 		return -1;
 	}
 
-	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &i, sizeof(i)) < 0)
+	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&i, sizeof(i)) < 0)
 		DPRINTF(E_WARN, L_GENERAL, "setsockopt(http, SO_REUSEADDR): %s\n", strerror(errno));
 
 	memset(&listenname, 0, sizeof(struct sockaddr_in));
@@ -205,7 +229,7 @@ getfriendlyname(char *buf, int len)
 	FILE *info;
 	char ibuf[64], *key, *val;
 	snprintf(buf+off, len-off, "ReadyNAS");
-	info = fopen("/proc/sys/dev/boot/info", "r");
+	info = my_fopen("/proc/sys/dev/boot/info", "r");
 	if (!info)
 		return;
 	while ((val = fgets(ibuf, 64, info)) != NULL)
@@ -274,7 +298,7 @@ open_db(sqlite3 **sq3)
 	int new_db = 0;
 
 	snprintf(path, sizeof(path), "%s/files.db", db_path);
-	if (access(path, F_OK) != 0)
+	if (my_access(path, F_OK) != 0)
 	{
 		new_db = 1;
 		make_dir(db_path, S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO);
@@ -292,11 +316,77 @@ open_db(sqlite3 **sq3)
 	return new_db;
 }
 
+#ifdef __CYGWIN__
+static void
+delete_db_cygwin(char *db_path)
+{
+	char real_path[PATH_MAX+1], path_tmp[PATH_MAX];
+
+	SHFILEOPSTRUCT file_op = {
+		NULL,
+		FO_DELETE,
+		real_path,
+		NULL,
+		FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI,
+		FALSE,
+		NULL,
+		""
+	};
+
+	snprintf(path_tmp, sizeof(path_tmp), "%s/files.db", db_path);
+	if (unlink(path_tmp) != 0) {
+		DPRINTF(E_ERROR, L_GENERAL, "cannot delete \"files.db\" : %s\n", strerror(errno));
+	}
+#ifdef _WIN32
+	snprintf(real_path, sizeof(real_path), "%s/art_cache", db_path);
+#else
+	snprintf(path_tmp, sizeof(path_tmp), "%s/art_cache", db_path);
+	if (cygwin_conv_path(CCP_POSIX_TO_WIN_A | CCP_ABSOLUTE, path_tmp, real_path, PATH_MAX) != 0)
+		return;
+#endif
+	real_path[strlen(real_path)+1] = '\0';
+	if (SHFileOperationA(&file_op) != 0)
+		DPRINTF(E_ERROR, L_GENERAL, "cannot delete \"art_cache\"\n");
+	return;
+}
+
+#ifdef WIN_PROFILE_SUPPORT
+static char optionsfile_cygwin[PATH_MAX] = {'\0'};
+static char pidfilename_cygwin[PATH_MAX] = {'\0'};
+#endif // WIN_PROFILE_SUPPORT
+#ifndef _WIN32
+static char *
+realpath_conv_path(char *path, char *resolved_path)
+{
+	char *ret=NULL;
+
+	if ((cygwin_posix_path_list_p(path) == FALSE) || (strchr(path, '\\') != NULL))
+	{
+		if (cygwin_conv_path(CCP_WIN_A_TO_POSIX | CCP_ABSOLUTE, path, resolved_path, PATH_MAX) == 0)
+			ret = resolved_path;
+	}
+	else
+		ret = realpath(path, resolved_path);
+
+	return(ret);
+}
+
+#define realpath(x, y) realpath_conv_path(x, y)
+
+#else
+#define realpath(x, y) _fullpath(x, y, PATH_MAX)
+#endif
+
+
+#endif // __CYGWIN__
+
 static void
 check_db(sqlite3 *db, int new_db, pid_t *scanner_pid)
 {
 	struct media_dir_s *media_path = NULL;
+#ifndef __CYGWIN__
 	char cmd[PATH_MAX*2];
+#endif // __CYGWIN__
 	char **result;
 	int i, rows = 0;
 	int ret;
@@ -353,9 +443,13 @@ rescan:
 				ret, DB_VERSION);
 		sqlite3_close(db);
 
+#ifndef __CYGWIN__
 		snprintf(cmd, sizeof(cmd), "rm -rf %s/files.db %s/art_cache", db_path, db_path);
 		if (system(cmd) != 0)
 			DPRINTF(E_FATAL, L_GENERAL, "Failed to clean old file cache!  Exiting...\n");
+#else // __CYGWIN__
+		delete_db_cygwin(db_path);
+#endif // __CYGWIN__
 
 		open_db(&db);
 		if (CreateDatabase() != 0)
@@ -390,10 +484,11 @@ rescan:
 static int
 writepidfile(const char *fname, int pid, uid_t uid)
 {
+	int ret = 0;
+#ifndef _WIN32
 	FILE *pidfile;
 	struct stat st;
 	char path[PATH_MAX], *dir;
-	int ret = 0;
 
 	if(!fname || *fname == '\0')
 		return -1;
@@ -426,7 +521,7 @@ writepidfile(const char *fname, int pid, uid_t uid)
 		}
 	}
 	
-	pidfile = fopen(fname, "w");
+	pidfile = my_fopen(fname, "w");
 	if (!pidfile)
 	{
 		DPRINTF(E_ERROR, L_GENERAL, "Unable to open pidfile for writing %s: %s\n",
@@ -448,6 +543,7 @@ writepidfile(const char *fname, int pid, uid_t uid)
 	}
 
 	fclose(pidfile);
+#endif
 
 	return ret;
 }
@@ -475,8 +571,20 @@ static void init_nls(void)
 	messages = setlocale(LC_MESSAGES, "");
 	if (!messages)
 		messages = "unset";
+#ifndef __CYGWIN__  
 	locale_dir = bindtextdomain("minidlna", getenv("TEXTDOMAINDIR"));
 	DPRINTF(E_DEBUG, L_GENERAL, "Using locale dir '%s' and locale langauge %s/%s\n", locale_dir, messages, ctype);
+#else // __CYGWIN__
+{
+	char *textdomaindir, *path=db_path, conv_path[PATH_MAX];
+	if( (textdomaindir = getenv("TEXTDOMAINDIR")) != NULL )
+	{
+		realpath_conv_path(textdomaindir, conv_path);
+		path = conv_path;
+	}
+	fprintf(stderr, "Using locale dir %s\n", bindtextdomain("minidlna", path));
+}
+#endif //  __CYGWIN__  
 	textdomain("minidlna");
 #endif
 }
@@ -493,13 +601,19 @@ static int
 init(int argc, char **argv)
 {
 	int i;
-	int pid;
 	int debug_flag = 0;
 	int verbose_flag = 0;
 	int options_flag = 0;
+	int pid;
+#ifndef _WIN32
 	struct sigaction sa;
+#endif
 	const char * presurl = NULL;
+#if defined(__CYGWIN__) && defined(WIN_PROFILE_SUPPORT)
+	const char * optionsfile = optionsfile_cygwin;
+#else
 	const char * optionsfile = "/etc/minidlna.conf";
+#endif // __CYGWIN__
 	char mac_str[13];
 	char *string, *word;
 	char *path;
@@ -510,6 +624,7 @@ init(int argc, char **argv)
 	int ifaces = 0;
 	media_types types;
 	uid_t uid = 0;
+	gid_t gid = 0;
 
 	/* first check if "-f" option is used */
 	for (i=2; i<argc; i++)
@@ -544,7 +659,7 @@ init(int argc, char **argv)
 	if (readoptionsfile(optionsfile) < 0)
 	{
 		/* only error if file exists or using -f */
-		if(access(optionsfile, F_OK) == 0 || options_flag)
+		if(my_access(optionsfile, F_OK) == 0 || options_flag)
 			DPRINTF(E_FATAL, L_GENERAL, "Error reading configuration file %s\n", optionsfile);
 	}
 
@@ -591,7 +706,18 @@ init(int argc, char **argv)
 			types = ALL_MEDIA;
 			path = ary_options[i].value;
 			word = strchr(path, ',');
-			if (word && (access(path, F_OK) != 0))
+#ifdef __CYGWIN__
+#ifndef _WIN32
+			if ((cygwin_posix_path_list_p(path) == FALSE) || (strchr(path, '\\') != NULL))
+			{
+				if (cygwin_conv_path(CCP_WIN_A_TO_POSIX | CCP_ABSOLUTE, path, buf, PATH_MAX))
+					word = NULL;
+			}
+			else
+#endif
+				strncpy(buf, path, PATH_MAX);
+#endif // __CYGWIN__
+			if (word && (my_access(path, F_OK) != 0))
 			{
 				types = 0;
 				while (*path)
@@ -614,7 +740,7 @@ init(int argc, char **argv)
 				}
 			}
 			path = realpath(path, buf);
-			if (!path || access(path, F_OK) != 0)
+			if (!path || my_access(path, F_OK) != 0)
 			{
 				DPRINTF(E_ERROR, L_GENERAL, "Media directory \"%s\" not accessible [%s]\n",
 					ary_options[i].value, strerror(errno));
@@ -660,7 +786,7 @@ init(int argc, char **argv)
 			if (!path)
 				path = (ary_options[i].value);
 			make_dir(path, S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO);
-			if (access(path, F_OK) != 0)
+			if (my_access(path, F_OK) != 0)
 				DPRINTF(E_FATAL, L_GENERAL, "Database path not accessible! [%s]\n", path);
 			strncpyt(db_path, path, PATH_MAX);
 			break;
@@ -669,7 +795,7 @@ init(int argc, char **argv)
 			if (!path)
 				path = (ary_options[i].value);
 			make_dir(path, S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO);
-			if (access(path, F_OK) != 0)
+			if (my_access(path, F_OK) != 0)
 				DPRINTF(E_FATAL, L_GENERAL, "Log path not accessible! [%s]\n", path);
 			strncpyt(log_path, path, PATH_MAX);
 			break;
@@ -722,6 +848,7 @@ init(int argc, char **argv)
 		case UPNPUUID:
 			strcpy(uuidvalue+5, ary_options[i].value);
 			break;
+#ifndef _WIN32
 		case USER_ACCOUNT:
 			uid = strtoul(ary_options[i].value, &string, 0);
 			if (*string)
@@ -732,8 +859,11 @@ init(int argc, char **argv)
 					DPRINTF(E_FATAL, L_GENERAL, "Bad user '%s'.\n",
 						ary_options[i].value);
 				uid = entry->pw_uid;
+				if (!gid)
+					gid = entry->pw_gid;
 			}
 			break;
+#endif
 		case FORCE_SORT_CRITERIA:
 			force_sort_criteria = ary_options[i].value;
 			break;
@@ -855,10 +985,15 @@ init(int argc, char **argv)
 			SETFLAG(RESCAN_MASK);
 			break;
 		case 'R':
+#ifndef __CYGWIN__
 			snprintf(buf, sizeof(buf), "rm -rf %s/files.db %s/art_cache", db_path, db_path);
 			if (system(buf) != 0)
-				DPRINTF(E_FATAL, L_GENERAL, "Failed to clean old file cache. EXITING\n");
+				DPRINTF(E_FATAL, L_GENERAL, "Failed to clean old file cache %s. EXITING\n", db_path);
+#else // __CYGWIN__
+			delete_db_cygwin(db_path);
+#endif // __CYGWIN__
 			break;
+#ifndef _WIN32
 		case 'u':
 			if (i+1 != argc)
 			{
@@ -871,12 +1006,31 @@ init(int argc, char **argv)
 					if (!entry)
 						DPRINTF(E_FATAL, L_GENERAL, "Bad user '%s'.\n", argv[i]);
 					uid = entry->pw_uid;
+					if (!gid)
+						gid = entry->pw_gid;
 				}
 			}
 			else
 				DPRINTF(E_FATAL, L_GENERAL, "Option -%c takes one argument.\n", argv[i][1]);
 			break;
+		case 'g':
+			if (i+1 != argc)
+			{
+				i++;
+				gid = strtoul(argv[i], &string, 0);
+				if (*string)
+				{
+					/* Symbolic group given, not GID. */
+					struct group *grp = getgrnam(argv[i]);
+					if (!grp)
+						DPRINTF(E_FATAL, L_GENERAL, "Bad group '%s'.\n", argv[i]);
+					gid = grp->gr_gid;
+				}
+			}
+			else
+				DPRINTF(E_FATAL, L_GENERAL, "Option -%c takes one argument.\n", argv[i][1]);
 			break;
+#endif
 #ifdef __linux__
 		case 'S':
 			SETFLAG(SYSTEMD_MASK);
@@ -896,7 +1050,7 @@ init(int argc, char **argv)
 	{
 		printf("Usage:\n\t"
 			"%s [-d] [-v] [-f config_file] [-p port]\n"
-			"\t\t[-i network_interface] [-u uid_to_run_as]\n"
+			"\t\t[-i network_interface] [-u uid_to_run_as] [-g group_to_run_as]\n"
 			"\t\t[-t notify_interval] [-P pid_filename]\n"
 			"\t\t[-s serial] [-m model_number]\n"
 #ifdef __linux__
@@ -933,13 +1087,13 @@ init(int argc, char **argv)
 	path = NULL;
 	if (debug_flag)
 	{
-		pid = getpid();
+		//pid = getpid();
 		strcpy(log_str+65, "maxdebug");
 		log_level = log_str;
 	}
 	else if (GETFLAG(SYSTEMD_MASK))
 	{
-		pid = getpid();
+		//pid = getpid();
 	}
 	else
 	{
@@ -948,19 +1102,18 @@ init(int argc, char **argv)
 		unlink("/ramfs/.upnp-av_scan");
 		path = "/var/log/upnp-av.log";
 		#else
-		if (access(db_path, F_OK) != 0)
+		if (my_access(db_path, F_OK) != 0)
 			make_dir(db_path, S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO);
 		snprintf(buf, sizeof(buf), "%s/minidlna.log", log_path);
 		path = buf;
 		#endif
 	}
 	log_init(path, log_level);
-
 	if (process_check_if_running(pidfilename) < 0)
 	{
 		DPRINTF(E_ERROR, L_GENERAL, SERVER_NAME " is already running. EXITING.\n");
 		return 1;
-	}	
+	}
 
 	set_startup_time();
 
@@ -971,6 +1124,12 @@ init(int argc, char **argv)
 		strcpy(presentationurl, "/");
 
 	/* set signal handlers */
+#ifdef _WIN32
+	if(signal(SIGTERM, sigterm))
+		DPRINTF(E_FATAL, L_GENERAL, "Failed to set %s handler. EXITING.\n", "SIGTERM");
+	if(signal(SIGINT, sigterm))
+		DPRINTF(E_FATAL, L_GENERAL, "Failed to set %s handler. EXITING.\n", "SIGINT");
+#else
 	memset(&sa, 0, sizeof(struct sigaction));
 	sa.sa_handler = sigterm;
 	if (sigaction(SIGTERM, &sa, NULL))
@@ -997,9 +1156,14 @@ init(int argc, char **argv)
 				db_path, uid, strerror(errno));
 	}
 
+	if (gid > 0 && setgid(gid) == -1)
+		DPRINTF(E_FATAL, L_GENERAL, "Failed to switch to gid '%d'. [%s] EXITING.\n",
+			gid, strerror(errno));
+
 	if (uid > 0 && setuid(uid) == -1)
 		DPRINTF(E_FATAL, L_GENERAL, "Failed to switch to uid '%d'. [%s] EXITING.\n",
 			uid, strerror(errno));
+#endif
 
 	children = calloc(runtime_vars.max_connections, sizeof(struct child));
 	if (!children)
@@ -1016,6 +1180,9 @@ init(int argc, char **argv)
 int
 main(int argc, char **argv)
 {
+	const WORD wVersionRequested = MAKEWORD(2, 2);
+	WSADATA wsaData;
+	WSAStartup(wVersionRequested, &wsaData);
 	int ret, i;
 	int shttpl = -1;
 	int smonitor = -1;
@@ -1029,7 +1196,13 @@ main(int argc, char **argv)
 	int max_fd = -1;
 	int last_changecnt = 0;
 	pid_t scanner_pid = 0;
+#ifdef HAVE_INOTIFY
+#ifdef _WIN32
+	HANDLE inotify_thread = NULL;
+#else
 	pthread_t inotify_thread = 0;
+#endif
+#endif
 #ifdef TIVO_SUPPORT
 	uint8_t beacon_interval = 5;
 	int sbeacon = -1;
@@ -1039,6 +1212,26 @@ main(int argc, char **argv)
 
 	for (i = 0; i < L_MAX; i++)
 		log_level[i] = E_WARN;
+  
+#if defined(__CYGWIN__) && defined(WIN_PROFILE_SUPPORT)
+	{
+		char *localappdata;
+		if( (localappdata = getenv("LOCALAPPDATA")) == NULL ) // Windows7, Vista
+			 localappdata = getenv("APPDATA");				 // Windows XP
+		if( localappdata != NULL )
+		{
+#ifdef _WIN32
+			strcpy(db_path, localappdata);
+#else
+			cygwin_conv_path (CCP_WIN_A_TO_POSIX | CCP_ABSOLUTE, localappdata, db_path, PATH_MAX);
+#endif
+			strcat(db_path, "/minidlna");
+			sprintf(optionsfile_cygwin, "%s/minidlna.conf", db_path);
+			sprintf(pidfilename_cygwin, "%s/minidlna.pid", db_path);
+			pidfilename = pidfilename_cygwin;
+		}
+	}
+#endif // __CYGWIN__  
 
 	ret = init(argc, argv);
 	if (ret != 0)
@@ -1052,6 +1245,10 @@ main(int argc, char **argv)
 	}
 
 	LIST_INIT(&upnphttphead);
+
+#ifdef __CYGWIN__
+	DPRINTF(E_INFO, L_GENERAL, "db_path = %s\n", db_path);
+#endif // __CYGWIN__
 
 	ret = open_db(NULL);
 	if (ret == 0)
@@ -1068,7 +1265,13 @@ main(int argc, char **argv)
 		if (!sqlite3_threadsafe() || sqlite3_libversion_number() < 3005001)
 			DPRINTF(E_ERROR, L_GENERAL, "SQLite library is not threadsafe!  "
 			                            "Inotify will be disabled.\n");
-		else if (pthread_create(&inotify_thread, NULL, start_inotify, NULL) != 0)
+		else if (
+#ifdef _WIN32
+			((inotify_thread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)start_inotify, NULL, 0, 0)) == NULL)
+#else
+			(pthread_create(&inotify_thread, NULL, start_inotify, NULL) != 0)
+#endif
+			)
 			DPRINTF(E_FATAL, L_GENERAL, "ERROR: pthread_create() failed for start_inotify. EXITING\n");
 	}
 #endif
@@ -1178,7 +1381,7 @@ main(int argc, char **argv)
 			}
 #endif
 		}
-
+#if HAVE_FORK
 		if (GETFLAG(SCANNING_MASK))
 		{
 			if (!scanner_pid || kill(scanner_pid, 0) != 0)
@@ -1188,6 +1391,7 @@ main(int argc, char **argv)
 					updateID++;
 			}
 		}
+#endif
 
 		/* select open sockets (SSDP, HTTP listen, and all HTTP soap sockets) */
 		FD_ZERO(&readset);
@@ -1229,6 +1433,10 @@ main(int argc, char **argv)
 		FD_ZERO(&writeset);
 		upnpevents_selectfds(&readset, &writeset, &max_fd);
 
+#ifdef __CYGWIN__
+		if (GETFLAG(SCANNING_MASK))
+			timeout.tv_sec = 1;
+#endif // __CYGWIN__
 		ret = select(max_fd+1, &readset, &writeset, 0, &timeout);
 		if (ret < 0)
 		{
@@ -1251,7 +1459,11 @@ main(int argc, char **argv)
 			ProcessTiVoBeacon(sbeacon);
 		}
 #endif
+#ifndef __CYGWIN__
 		if (smonitor >= 0 && FD_ISSET(smonitor, &readset))
+#else // __CYGWIN__
+		if (smonitor == -2)
+#endif // __CYGWIN__
 		{
 			ProcessMonitorEvent(smonitor);
 		}
@@ -1332,8 +1544,10 @@ main(int argc, char **argv)
 
 shutdown:
 	/* kill the scanner */
+#ifndef _WIN32
 	if (GETFLAG(SCANNING_MASK) && scanner_pid)
 		kill(scanner_pid, SIGKILL);
+#endif
 
 	/* close out open sockets */
 	while (upnphttphead.lh_first != NULL)
@@ -1359,11 +1573,18 @@ shutdown:
 		close(lan_addr[i].snotify);
 	}
 
+#ifdef HAVE_INOTIFY
 	if (inotify_thread)
 	{
+#ifdef _WIN32
+		WaitForSingleObject(inotify_thread, INFINITE);
+		CloseHandle(inotify_thread);
+#else
 		pthread_kill(inotify_thread, SIGCHLD);
 		pthread_join(inotify_thread, NULL);
+#endif
 	}
+#endif
 
 	/* kill other child processes */
 	process_reap_children();
@@ -1379,7 +1600,14 @@ shutdown:
 
 	log_close();
 	freeoptions();
+#ifdef _WIN32
+	WSACleanup();
 
+	if(hMutexHandle != INVALID_HANDLE_VALUE) {
+		ReleaseMutex(hMutexHandle);
+		CloseHandle(hMutexHandle);
+	}
+#endif
 	exit(EXIT_SUCCESS);
 }
 

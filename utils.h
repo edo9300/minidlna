@@ -25,8 +25,75 @@
 #define __UTILS_H__
 
 #include <stdarg.h>
+#ifdef _WIN32
+#include <stdint.h>
+#define strcasecmp(x,y) _stricmp(x,y)
+#define strncasecmp(x,y,z) _strnicmp(x,y,z)
+#define strtok_r strtok_s
+#define __attribute__(...)
+char* dirname(char* path);
+char* basename(char* path);
+char* strsep(char** sp, char* sep);
+int asprintf(char** strp, const char* fmt, ...);
+char* strcasestr(const char* s, const char* find);
+#define inet_aton(x, y) inet_pton(AF_INET, x,y)
+#define mode_t int
+#define S_IRWXU 0
+#define S_IRGRP 0
+#define S_IXGRP 0
+#define S_IROTH 0
+#define S_IXOTH 0
+#define S_ISVTX 0
+#define S_IRWXG 0
+#define S_IRWXO 0
+#define MIN min
+#define MAXPATHLEN MAX_PATH
+#define PATH_MAX MAX_PATH
+#define	F_OK		0	/* test for existence of file */
+#define	X_OK		0x01	/* test for execute or search permission */
+#define	W_OK		0x02	/* test for write permission */
+#define	R_OK		0x04	/* test for read permission */
+#if !defined(S_ISREG) && defined(S_IFMT) && defined(S_IFREG)
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+#endif
+#if !defined(S_ISDIR) && defined(S_IFMT) && defined(S_IFDIR)
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#endif
+int link(const char* path1, const char* path2);
+
+struct timezone {
+	int  tz_minuteswest; /* minutes W of Greenwich */
+	int  tz_dsttime;     /* type of dst correction */
+};
+int gettimeofday(struct timeval* tv, struct timezone* tz);
+int my_access(char const* _FileName, int _AccessMode);
+#include "dirent.h"
+struct my_stat {
+	_dev_t         st_dev;
+	_ino_t         st_ino;
+	unsigned short st_mode;
+	short          st_nlink;
+	short          st_uid;
+	short          st_gid;
+	_dev_t         st_rdev;
+	__int64        st_size;
+	__time64_t     st_atime;
+	__time64_t     st_mtime;
+	__time64_t     st_ctime;
+};
+int my_stat(char const* _FileName, struct my_stat* _Stat);
+FILE* my_fopen(const char* path, const char* mode);
+typedef int64_t my_off_t;
+#define ftello _ftelli64
+#define fseeko _fseeki64
+#else
 #include <dirent.h>
 #include <sys/param.h>
+#define my_access access
+#define my_stat stat
+#define my_fopen fopen
+typedef off_t my_off_t;
+#endif
 
 #include "minidlnatypes.h"
 

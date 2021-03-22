@@ -42,5 +42,5 @@ int
 is_tivo_file(const char *path);
 
 #else
-#define decodeString(X, Y) ({})
+#define decodeString(X, Y) ((void)0)
 #endif

@@ -17,11 +17,17 @@
  */
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "sql.h"
 #include "upnpglobalvars.h"
 #include "log.h"
+#ifdef _WIN32
+#define _WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#define sleep(x) Sleep(x * 1000)
+#else
+#include <unistd.h>
+#endif
 
 int
 sql_exec(sqlite3 *db, const char *fmt, ...)

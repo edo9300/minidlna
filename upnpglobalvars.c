@@ -47,9 +47,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <sys/types.h>
+#include <limits.h>
+#ifdef _WIN32
+#define PATH_MAX MAX_PATH
+#else
 #include <netinet/in.h>
 #include <sys/param.h>
-#include <limits.h>
+#endif
 
 #include "config.h"
 #include "upnpglobalvars.h"

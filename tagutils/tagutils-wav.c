@@ -79,7 +79,7 @@ _get_wavtags(char *filename, struct song_metadata *psong)
 
 	/* now, walk through the chunks */
 	current_offset = 12;
-	while(current_offset + 8 < psong->file_size)
+	while(current_offset + 8 < (uint32_t)psong->file_size)
 	{
 		len = 8;
 		if(!(len = read(fd, hdr, len)) || (len != 8))
@@ -100,7 +100,7 @@ _get_wavtags(char *filename, struct song_metadata *psong)
 		//        isprint(hdr[3]) ? hdr[3] : '?',
 		//        block_len);
 
-		if(block_len > psong->file_size)
+		if(block_len > (uint32_t)psong->file_size)
 		{
 			close(fd);
 			DPRINTF(E_WARN, L_SCANNER, "Bad block len: %s\n", filename);

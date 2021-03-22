@@ -26,7 +26,7 @@ _get_flctags(char *filename, struct song_metadata *psong)
 	FLAC__Metadata_SimpleIterator *iterator = 0;
 	FLAC__StreamMetadata *block;
 	unsigned int sec, ms;
-	int i;
+	unsigned int i;
 	int err = 0;
 
 	if(!(iterator = FLAC__metadata_simple_iterator_new()))
