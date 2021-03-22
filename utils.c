@@ -713,7 +713,7 @@ is_album_art(const char * name)
 int
 resolve_unknown_type(const char * path, media_types dir_type)
 {
-	struct stat entry;
+	struct my_stat entry;
 	enum file_types type = TYPE_UNKNOWN;
 
 #ifndef _WIN32
@@ -733,10 +733,10 @@ resolve_unknown_type(const char * path, media_types dir_type)
 					return type;
 				}
 			}
-			stat(path, &entry);
+			my_stat(path, &entry);
 		}
 #else
-	if(stat(path, &entry) == 0) {
+	if(my_stat(path, &entry) == 0) {
 #endif
 		if( S_ISDIR(entry.st_mode) )
 		{
