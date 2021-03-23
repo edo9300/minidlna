@@ -26,6 +26,7 @@
 
 #include <stdint.h>
 #include <sqlite3.h>
+#include "config.h"
 
 #ifndef HAVE_SQLITE3_MALLOC
 #define sqlite3_malloc(size) sqlite3_mprintf("%*s", size, "")
