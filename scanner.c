@@ -810,7 +810,7 @@ ScanDirectory(const char *dir, const char *parent, media_types dir_types)
 		{
 			type = resolve_unknown_type(full_path, dir_types);
 		}
-		if( (type == TYPE_DIR) && (my_access(full_path, 0) == 0) )
+		if( (type == TYPE_DIR) && (my_access(full_path, R_OK | X_OK) == 0) )
 		{
 			char *parent_id;
 			insert_directory(name, full_path, BROWSEDIR_ID, THISORNUL(parent), i+startID);
@@ -889,7 +889,9 @@ start_rescan(void)
 	{
 		char path[MAXPATHLEN], buf[MAXPATHLEN];
 		strncpyt(path, media_path->path, sizeof(path));
+#ifdef _WIN32
 		normalize_path(path);
+#endif
 		strncpyt(buf, media_path->path, sizeof(buf));
 		esc_name = escape_tag(basename(buf), 1);
 		monitor_insert_directory(0, esc_name, path);
