@@ -146,7 +146,7 @@ process_daemonize(void)
 	FreeConsole();
 #endif
 #if USE_FORK
-#ifdef USE_DAEMON
+#ifndef USE_DAEMON
 	int i;
 
 	switch(fork())
