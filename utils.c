@@ -197,7 +197,7 @@ static int vasprintf(char** strp, const char* fmt, va_list ap) {
 }
 
 char* dirname(char* path) {
-	static char ret[MAX_PATH];
+	static char __declspec(thread) ret[MAX_PATH];
 	if(path != ret)
 		strcpy(ret, path);
 	char base[MAX_PATH];
