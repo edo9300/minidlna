@@ -248,6 +248,19 @@ char* strcasestr(const char* s, const char* find) {
 	return ((char*)s);
 }
 
+char* normalize_path(char* str) {
+	char* current_pos = strchr(str, '\\');
+	while(current_pos) {
+		*current_pos = '/';
+		current_pos = strchr(current_pos, '\\');
+	}
+	return str;
+}
+char* realpath(const char* x, const char* y) {
+	char* ret = _fullpath(y, x, PATH_MAX);
+	normalize_path(ret);
+	return ret;
+}
 #endif
 
 int

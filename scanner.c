@@ -23,14 +23,6 @@
 #ifdef _WIN32
 #include "dirent.h"
 #include <io.h>
-static char* normalize_path(char* str) {
-	char* current_pos = strchr(str, '\\');
-	while(current_pos) {
-		*current_pos = '/';
-		current_pos = strchr(current_pos, '\\');
-	}
-	return str;
-}
 #else
 #include <unistd.h>
 #include <dirent.h>
@@ -889,9 +881,6 @@ start_rescan(void)
 	{
 		char path[MAXPATHLEN], buf[MAXPATHLEN];
 		strncpyt(path, media_path->path, sizeof(path));
-#ifdef _WIN32
-		normalize_path(path);
-#endif
 		strncpyt(buf, media_path->path, sizeof(buf));
 		esc_name = escape_tag(basename(buf), 1);
 		monitor_insert_directory(0, esc_name, path);

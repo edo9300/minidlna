@@ -1368,11 +1368,7 @@ _open_file(const char *orig_path, FILE** ret)
 
 	if (!GETFLAG(WIDE_LINKS_MASK))
 	{
-#ifdef _WIN32
-		path = _fullpath(buf, orig_path, PATH_MAX);
-#else
 		path = realpath(orig_path, buf);
-#endif
 		if (!path)
 		{
 			DPRINTF(E_ERROR, L_HTTP, "Error resolving path %s: %s\n",

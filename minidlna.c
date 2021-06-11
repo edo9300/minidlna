@@ -372,9 +372,6 @@ realpath_conv_path(char *path, char *resolved_path)
 }
 
 #define realpath(x, y) realpath_conv_path(x, y)
-
-#else
-#define realpath(x, y) _fullpath(x, y, PATH_MAX)
 #endif
 
 
@@ -589,17 +586,6 @@ static void init_nls(void)
 #endif
 }
 
-#ifdef _WIN32
-static char* normalize_path(char* str) {
-	char* current_pos = strchr(str, '\\');
-	while(current_pos) {
-		*current_pos = '/';
-		current_pos = strchr(current_pos, '\\');
-	}
-	return str;
-}
-#endif
-
 /* init phase :
  * 1) read configuration file
  * 2) read command line arguments
@@ -759,11 +745,6 @@ init(int argc, char **argv)
 			}
 			media_dir = calloc(1, sizeof(struct media_dir_s));
 			media_dir->path = strdup(path);
-#ifdef _WIN32
-			normalize_path(media_dir->path); //escape the path and replace all the backward slashes with
-											 //forward slashes otherwise it will cause issues when media
-											 //is deleted as it will fail to find the matching entry
-#endif
 			media_dir->types = types;
 			if (media_dirs)
 			{
