@@ -633,7 +633,7 @@ no_exifdata:
 	/* If SOF parsing fails, then fall through to reading the JPEG data with libjpeg to get the resolution */
 	if( image_get_jpeg_resolution(path, &width, &height) != 0 || !width || !height )
 	{
-		infile = my_fopen(path, "r");
+		infile = my_fopen(path, "rb");
 		if( infile )
 		{
 			cinfo.err = jpeg_std_error(&jerr);

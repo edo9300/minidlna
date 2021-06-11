@@ -247,7 +247,7 @@ image_get_jpeg_resolution(const char * path, int * width, int * height)
 	my_off_t size;
 	
 
-	img = my_fopen(path, "r");
+	img = my_fopen(path, "rb");
 	if( !img )
 		return -1;
 
@@ -313,7 +313,7 @@ image_get_jpeg_date_xmp(const char * path, char ** date)
 	int ret = 1;
 	size_t nread;
 
-	img = my_fopen(path, "r");
+	img = my_fopen(path, "rb");
 	if( !img )
 		return(-1);
 
@@ -441,7 +441,7 @@ image_new_from_jpeg(const char *path, int is_file, const uint8_t *buf, int size,
 	jpeg_create_decompress(&cinfo);
 	if( is_file )
 	{
-		if( (file = my_fopen(path, "r")) == NULL )
+		if( (file = my_fopen(path, "rb")) == NULL )
 		{
 			return NULL;
 		}
@@ -863,7 +863,7 @@ image_save_to_jpeg_file(image_s * pimage, char * path)
 	buf = image_save_to_jpeg_buf(pimage, &size);
 	if( !buf )
 		return NULL;
-	dst_file = my_fopen(path, "w");
+	dst_file = my_fopen(path, "wb");
 	if( !dst_file )
 	{
 		free(buf);

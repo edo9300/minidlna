@@ -239,7 +239,7 @@ check_embedded_art(const char *path, uint8_t *image_data, int image_size)
 		cache_dir = strdup(art_path);
 		make_dir(dirname(cache_dir), S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
 		free(cache_dir);
-		dstfile = my_fopen(art_path, "w");
+		dstfile = my_fopen(art_path, "wb");
 		if( !dstfile )
 		{
 			free(art_path);
