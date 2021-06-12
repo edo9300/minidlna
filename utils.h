@@ -37,7 +37,7 @@ char* strsep(char** sp, char* sep);
 int asprintf(char** strp, const char* fmt, ...);
 char* strcasestr(const char* s, const char* find);
 char* normalize_path(char* str);
-char* realpath(char* x, const char* y);
+char* realpath(const char* x, char* y);
 #define inet_aton(x, y) inet_pton(AF_INET, x,y)
 #define mode_t int
 #define S_IRWXU 0

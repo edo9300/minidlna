@@ -256,7 +256,7 @@ char* normalize_path(char* str) {
 	}
 	return str;
 }
-char* realpath(const char* x, const char* y) {
+char* realpath(const char* x, char* y) {
 	char* ret = _fullpath(y, x, PATH_MAX);
 	normalize_path(ret);
 	return ret;
