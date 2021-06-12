@@ -117,6 +117,8 @@
 #define MAX max
 #define close closesocket
 extern HANDLE hMutexHandle;
+extern HANDLE hHttpUPNPHandle;
+HANDLE hHttpUPNPHandle = INVALID_HANDLE_VALUE;
 #define kill(pid,...) TerminateProcess(pid, 0)
 #endif
 
@@ -1196,6 +1198,7 @@ main(int argc, char **argv)
 #ifdef HAVE_INOTIFY
 #ifdef _WIN32
 	HANDLE inotify_thread = NULL;
+	hHttpUPNPHandle = CreateMutex(NULL, NULL, NULL);
 #else
 	pthread_t inotify_thread = 0;
 #endif
@@ -1527,6 +1530,9 @@ main(int argc, char **argv)
 				}
 			}
 		}
+#ifdef _WIN32
+		WaitForSingleObject(hHttpUPNPHandle, INFINITE);
+#endif
 		/* delete finished HTTP connections */
 		for (e = upnphttphead.lh_first; e != NULL; e = next)
 		{
@@ -1537,6 +1543,9 @@ main(int argc, char **argv)
 				Delete_upnphttp(e);
 			}
 		}
+#ifdef _WIN32
+		ReleaseMutex(hHttpUPNPHandle);
+#endif
 	}
 
 shutdown:

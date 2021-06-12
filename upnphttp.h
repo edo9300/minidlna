@@ -145,6 +145,10 @@ New_upnphttp(int);
 void
 CloseSocket_upnphttp(struct upnphttp *);
 
+/* ThreadedState_upnphttp() */
+void
+ThreadedState_upnphttp(struct upnphttp *);
+
 /* Delete_upnphttp() */
 void
 Delete_upnphttp(struct upnphttp *);

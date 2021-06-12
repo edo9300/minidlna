@@ -108,6 +108,13 @@ static void SendResp_resizedimg(struct upnphttp *, char * url);
 static void SendResp_thumbnail(struct upnphttp *, char * url);
 static void SendResp_dlnafile(struct upnphttp *, char * url);
 
+static void togglesocketnonblocking(int s, u_long blocking) {
+	int iResult = ioctlsocket(s, FIONBIO, &blocking);
+	if(iResult != NO_ERROR) {
+		DPRINTF(E_ERROR, L_HTTP, "New_upnphttp: ioctlsocket(%d): %ld\n", s, iResult);
+	}
+}
+
 struct upnphttp * 
 New_upnphttp(int s)
 {
@@ -118,11 +125,7 @@ New_upnphttp(int s)
 	if(ret == NULL)
 		return NULL;
 #ifdef _WIN32
-	u_long iMode = 1;
-	int iResult = ioctlsocket(s, FIONBIO, &iMode);
-	if(iResult != NO_ERROR) {
-		DPRINTF(E_ERROR, L_HTTP, "New_upnphttp: ioctlsocket(%d): %ld\n", s, iResult);
-	}
+	togglesocketnonblocking(s, 1);
 #endif
 	memset(ret, 0, sizeof(struct upnphttp));
 	ret->socket = s;
@@ -142,6 +145,12 @@ CloseSocket_upnphttp(struct upnphttp * h)
 	}
 	h->socket = -1;
 	h->state = 100;
+}
+
+void
+ThreadedState_upnphttp(struct upnphttp * h)
+{
+	h->state = 50;
 }
 
 void
@@ -1318,21 +1327,20 @@ send_file(struct upnphttp * h, FILE* sendfd, my_off_t offset, my_off_t  end_offs
 		send_size = (((end_offset - offset) < MIN_BUFFER_SIZE) ? (end_offset - offset + 1) : MIN_BUFFER_SIZE);
 		fseeko(sendfd, offset, SEEK_SET);
 		ret = fread(buf, 1, send_size, sendfd);
-		if( ret == -1 ) {
+		if( ret != send_size) {
 			DPRINTF(E_DEBUG, L_HTTP, "read error :: error no. %d [%s]\n", errno, strerror(errno));
-			if( errno == EAGAIN )
-				continue;
-			else
 				break;
 		}
 		if(ret == 0)
 			continue;
 		ret = send(h->socket, buf, ret, 0);
 		if( ret == -1 ) {
-			DPRINTF(E_DEBUG, L_HTTP, "write error :: error no. %d [%s]\n", errno, strerror(errno));
+			DPRINTF(E_DEBUG, L_HTTP, "write error :: error no. %d [%s]\n", WSAGetLastError(), strerror(errno));
+#ifndef _WIN32
 			if( errno == EAGAIN )
 				continue;
 			else
+#endif
 				break;
 		}
 		offset += ret;
@@ -1863,9 +1871,40 @@ resized_error:
 #endif
 }
 
+#ifdef _WIN32
+extern HANDLE hHttpUPNPHandle;
+typedef struct thread_params {
+	FILE* sendfh;
+	struct upnphttp* h;
+	my_off_t offset;
+} thread_params;
+
+static DWORD WINAPI send_dlnafile_thread(LPVOID param) {
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+	struct thread_params* params = param;
+	togglesocketnonblocking(params->h->socket, 0);
+	send_file(params->h, params->sendfh, params->offset, params->h->req_RangeEnd);
+	WaitForSingleObject(hHttpUPNPHandle, INFINITE);
+	fclose(params->sendfh);
+	CloseSocket_upnphttp(params->h);
+	ReleaseMutex(hHttpUPNPHandle);
+	free(param);
+}
+
+static void send_dlnafile_threaded(struct upnphttp* h, FILE* sendfh, my_off_t offset) {
+	struct thread_params* params = malloc(sizeof(thread_params));
+	params->sendfh = sendfh;
+	params->h = h;
+	params->offset = offset;
+	ThreadedState_upnphttp(h);
+	CreateThread(0, 0, send_dlnafile_thread, params, 0, 0);
+}
+#endif
+
 static void
 SendResp_dlnafile(struct upnphttp *h, char *object)
 {
+	static const char* mode_background = "Background";
 	char header[1024];
 	struct string_s str;
 	char buf[128];
@@ -2025,7 +2064,11 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 	   (setpriority(PRIO_PROCESS, 0, 19) == 0)
 #endif
 	   )
-		tmode = "Background";
+		tmode = mode_background;
+	else
+#elif defined(_WIN32)
+	if(h->reqflags & FLAG_XFERBACKGROUND)
+	   tmode = mode_background;
 	else
 #endif
 	if( strncmp(last_file.mime, "image", 5) == 0 )
@@ -2099,8 +2142,13 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 	//DEBUG DPRINTF(E_DEBUG, L_HTTP, "RESPONSE: %s\n", str.data);
 	if( send_data(h, str.data, str.off, MSG_MORE) == 0 )
 	{
-		if( h->req_command != EHead )
+		if(h->req_command != EHead) {
+#ifdef _WIN32
+			send_dlnafile_threaded(h, sendfh, offset);
+			return;
+#endif
 			send_file(h, sendfh, offset, h->req_RangeEnd);
+		}
 	}
 	fclose(sendfh);
 
