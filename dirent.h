@@ -647,8 +647,8 @@ static DIR *opendir(const char *dirname)
 	/* Convert directory name to wide-character string */
 	wchar_t wname[PATH_MAX + 1];
 	size_t n;
-	int error = mbstowcs_s(&n, wname, PATH_MAX + 1, dirname, PATH_MAX+1);
-	if (error)
+	n = MultiByteToWideChar(CP_UTF8, 0, dirname, -1, wname, PATH_MAX + 1);
+	if (n == 0)
 		goto exit_failure;
 
 	/* Open directory stream using wide-character name */
