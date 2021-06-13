@@ -10,7 +10,6 @@ config.rpath
 config.sub
 config.status
 config.log
-config.h
 confdefs.h
 conftest.*
 configure
