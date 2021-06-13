@@ -86,7 +86,7 @@ int gettimeofday(struct timeval* tv, struct timezone* tz) {
 	return 0;
 }
 
-static wchar_t* ToWide(char const* _FileName) {
+wchar_t* ToWide(char const* _FileName) {
 	int len = MultiByteToWideChar(CP_UTF8, 0, _FileName, -1, NULL, 0);
 	wchar_t* str = malloc(len * sizeof(wchar_t));
 	MultiByteToWideChar(CP_UTF8, 0, _FileName, -1, str, len);
@@ -122,7 +122,7 @@ FILE* my_fopen(const char* path, const char* mode) {
 	return ret;
 }
 
-static DWORD GetBasePathFromPathName(LPCTSTR szPathName,
+static DWORD GetBasePathFromPathName(LPTSTR szPathName,
 							  LPTSTR  szBasePath,
 							  DWORD   dwBasePathSize) {
 	TCHAR   szDrive[_MAX_DRIVE] = { 0 };
@@ -200,10 +200,18 @@ char* dirname(char* path) {
 	static char __declspec(thread) ret[MAX_PATH];
 	if(path != ret)
 		strcpy(ret, path);
-	char base[MAX_PATH];
+	TCHAR base[MAX_PATH];
 	base[0] = 0;
+#ifdef UNICODE
+	wchar_t* wpath = ToWide(path);
+	GetBasePathFromPathName(wpath, base, MAX_PATH);
+	free(wpath);
+	size_t n = WideCharToMultiByte(CP_UTF8, 0, base, -1, ret, PATH_MAX, NULL, NULL);
+	base[n] = 0;
+#else
 	GetBasePathFromPathName(path, base, MAX_PATH);
 	memcpy(ret, base, MAX_PATH);
+#endif
 
 	return ret;
 }
@@ -520,7 +528,14 @@ make_dir(char * path, mode_t mode)
 			++s;
 		}
 #ifdef _WIN32
+#ifdef UNICODE
+		wchar_t* wpath = ToWide(path);
+		int failure = !CreateDirectory(wpath, NULL);
+		free(path);
+		if(failure) {
+#else
 		if(!CreateDirectory(path, NULL)) {
+#endif
 			DWORD error = GetLastError();
 			if(error != ERROR_ALREADY_EXISTS && error != ERROR_ACCESS_DENIED) {
 				DPRINTF(E_WARN, L_GENERAL, "make_dir: cannot create directory '%s'\n", path);

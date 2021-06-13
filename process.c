@@ -199,7 +199,7 @@ process_check_if_running(const char *fname)
 {
 #ifdef _WIN32
 	// ensure only one running instance
-	hMutexHandle = CreateMutex(NULL, TRUE, fname);
+	hMutexHandle = CreateMutexA(NULL, TRUE, fname);
 	if(GetLastError() == ERROR_ALREADY_EXISTS) {
 		return -1;
 	}

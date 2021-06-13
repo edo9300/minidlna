@@ -324,7 +324,7 @@ delete_db_cygwin(char *db_path)
 {
 	char real_path[PATH_MAX+1], path_tmp[PATH_MAX];
 
-	SHFILEOPSTRUCT file_op = {
+	SHFILEOPSTRUCTA file_op = {
 		NULL,
 		FO_DELETE,
 		real_path,

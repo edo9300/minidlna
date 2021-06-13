@@ -913,15 +913,21 @@ inotify_create_watches()
 	media_path = media_dirs;
 	for (num_watches = 0 ; media_path && (num_watches < WATCH_LIMIT) ; num_watches++)
 	{
+#ifdef UNICODE
+		wchar_t* wpath_win_style = ToWide(media_path->path);
+		char* path_win_style = media_path->path;
+#else
 		char path_win_style[PATH_BUF_SIZE];
+		char* wpath_win_style = path_win_style;
 #ifdef _WIN32
 		strncpy(path_win_style, media_path->path, PATH_BUF_SIZE);
 #else
 		cygwin_conv_path (CCP_POSIX_TO_WIN_A | CCP_ABSOLUTE, media_path->path, path_win_style, PATH_BUF_SIZE);
 #endif
+#endif
 
 		hret = CreateFile(
-			path_win_style,					// pointer to the file name
+			wpath_win_style,					// pointer to the file name
 			FILE_LIST_DIRECTORY,            // access (read/write) mode
 			FILE_SHARE_READ					// share mode
 			| FILE_SHARE_WRITE
@@ -931,6 +937,9 @@ inotify_create_watches()
 			FILE_FLAG_BACKUP_SEMANTICS		// file attributes
 			| FILE_FLAG_OVERLAPPED,
 			NULL);                          // file with attributes to copy
+#ifdef UNICODE
+		free(wpath_win_style);
+#endif
 		if (hret == INVALID_HANDLE_VALUE)
 		{
 			DPRINTF(E_ERROR, L_INOTIFY, "can not open directory : %s\n", path_win_style);

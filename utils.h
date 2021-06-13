@@ -62,6 +62,7 @@ char* realpath(const char* x, char* y);
 #define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
 #endif
 int link(const char* path1, const char* path2);
+wchar_t* ToWide(char const* _FileName);
 
 struct timezone {
 	int  tz_minuteswest; /* minutes W of Greenwich */
