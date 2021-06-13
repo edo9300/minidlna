@@ -1889,6 +1889,7 @@ static DWORD WINAPI send_dlnafile_thread(LPVOID param) {
 	CloseSocket_upnphttp(params->h);
 	ReleaseMutex(hHttpUPNPHandle);
 	free(param);
+	return 0;
 }
 
 static void send_dlnafile_threaded(struct upnphttp* h, FILE* sendfh, my_off_t offset) {
@@ -2146,8 +2147,9 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 #ifdef _WIN32
 			send_dlnafile_threaded(h, sendfh, offset);
 			return;
-#endif
+#else
 			send_file(h, sendfh, offset, h->req_RangeEnd);
+#endif
 		}
 	}
 	fclose(sendfh);

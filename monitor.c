@@ -59,6 +59,9 @@
 #include "albumart.h"
 #include "playlist.h"
 #include "log.h"
+#if defined(__CYGWIN__) || defined(_WIN32)
+#define CYGWIN_OR_WIN32
+#endif
 
 static time_t next_pl_fill = 0;
 
@@ -69,22 +72,13 @@ static time_t next_pl_fill = 0;
 
 #define PATH_BUF_SIZE PATH_MAX
 
-#if defined(__CYGWIN__) || defined(_WIN32)
+#ifdef CYGWIN_OR_WIN32
 
-#ifdef _WIN32
-static char* normalize_path(char* str) {
-	char* current_pos = strchr(str, '\\');
-	while(current_pos) {
-		*current_pos = '/';
-		current_pos = strchr(current_pos, '\\');
-	}
-	return str;
-}
-#else
+#ifndef _WIN32
 #include <sys/cygwin.h>
 #endif
 
-#else // __CYGWIN__
+#else // CYGWIN_OR_WIN32
 
 struct watch
 {
@@ -352,7 +346,7 @@ monitor_remove_file(const char * path)
 
 	return 0;
 }
-#endif // __CYGWIN__
+#endif // HAVE_INOTIFY
 
 static char *
 check_nfo(const char *path)
@@ -498,9 +492,9 @@ monitor_insert_file(const char *name, const char *path)
 		//DEBUG DPRINTF(E_DEBUG, L_INOTIFY, "Inserting %s\n", name);
 		int ret = insert_file(name, path, id+2, get_next_available_id("OBJECTS", id), dir_types);
 
-#if defined(__CYGWIN__) || defined(_WIN32)
+#ifdef CYGWIN_OR_WIN32
 		DPRINTF(E_DEBUG, L_INOTIFY, "Inserting %s:%s\n", name, path);
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 
 		if (ret == 1 && (mtype & TYPE_PLAYLIST))
 		{
@@ -551,7 +545,7 @@ monitor_insert_directory(int fd, char *name, const char * path)
 		free(parent_buf);
 	}
 
-#if !defined(__CYGWIN__) && !defined(_WIN32)
+#ifndef CYGWIN_OR_WIN32
 	if( fd > 0 )
 	{
 		#ifdef HAVE_INOTIFY
@@ -566,7 +560,7 @@ monitor_insert_directory(int fd, char *name, const char * path)
 		}
 		#endif
 	}
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 
 	dir_types = valid_media_types(path);
 
@@ -600,11 +594,9 @@ monitor_insert_directory(int fd, char *name, const char * path)
 		}
 		else if( type == TYPE_FILE )
 		{
-#ifdef _WIN32
-			if(TRUE)
-#elif defined(_CYGWIN__)
+#if defined(__CYGWIN__)
 			if( (stat(path_buf, &st) == 0) && (st.st_blocks<<9 >= st.st_size) )
-#else // __CYGWIN__
+#elif !defined(_WIN32) // __CYGWIN__
 			if( (stat(path_buf, &st) == 0) && (st.st_blocks*S_BLKSIZE >= st.st_size) )
 #endif // __CYGWIN__
 			{
@@ -628,14 +620,12 @@ monitor_remove_directory(int fd, const char * path)
 
 	/* Invalidate the scanner cache so we don't insert files into non-existent containers */
 	valid_cache = 0;
-#ifdef HAVE_INOTIFY
-#if !defined(__CYGWIN__) && !defined(_WIN32)
+#if defined(HAVE_INOTIFY) && !defined(CYGWIN_OR_WIN32)
 	if( fd > 0 )
 	{
 		remove_watch(fd, path);
 	}
-#endif // __CYGWIN__
-#endif
+#endif // HAVE_INOTIFY
 	sql = sqlite3_mprintf("SELECT ID from DETAILS where (PATH > '%q/' and PATH <= '%q/%c')"
 	                      " or PATH = '%q'", path, path, 0xFF, path);
 	if( (sql_get_table(db, sql, &result, &rows, NULL) == SQLITE_OK) )
@@ -660,7 +650,7 @@ monitor_remove_directory(int fd, const char * path)
 }
 
 #ifdef HAVE_INOTIFY
-#if !defined(__CYGWIN__) && !defined(_WIN32)
+#ifndef CYGWIN_OR_WIN32
 void *
 start_inotify(void)
 {
@@ -792,7 +782,7 @@ quitting:
 
 	return 0;
 }
-#else // __CYGWIN__
+#else // CYGWIN_OR_WIN32
 
 #include <windows.h>
 //#include <dirent.h> // for opendir()

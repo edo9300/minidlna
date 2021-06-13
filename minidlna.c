@@ -104,14 +104,14 @@
 #include <sys/cygwin.h>
 #include <windows.h>
 #endif // __CYGWIN__
+#if defined(__CYGWIN__) || defined(_WIN32)
+#define CYGWIN_OR_WIN32
+#endif
 #ifdef _WIN32
-#define __CYGWIN__
 #define WIN_PROFILE_SUPPORT
 #define STATIC
 #include <WinSock2.h>
 #define socklen_t int
-#define uid_t int
-#define gid_t int
 #include <windows.h>
 #include <io.h>
 #define MAX max
@@ -318,7 +318,7 @@ open_db(sqlite3 **sq3)
 	return new_db;
 }
 
-#ifdef __CYGWIN__
+#ifdef CYGWIN_OR_WIN32
 static void
 delete_db_cygwin(char *db_path)
 {
@@ -377,15 +377,15 @@ realpath_conv_path(char *path, char *resolved_path)
 #endif
 
 
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 
 static void
 check_db(sqlite3 *db, int new_db, pid_t *scanner_pid)
 {
 	struct media_dir_s *media_path = NULL;
-#ifndef __CYGWIN__
+#ifndef CYGWIN_OR_WIN32
 	char cmd[PATH_MAX*2];
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 	char **result;
 	int i, rows = 0;
 	int ret;
@@ -442,13 +442,13 @@ rescan:
 				ret, DB_VERSION);
 		sqlite3_close(db);
 
-#ifndef __CYGWIN__
+#ifndef CYGWIN_OR_WIN32
 		snprintf(cmd, sizeof(cmd), "rm -rf %s/files.db %s/art_cache", db_path, db_path);
 		if (system(cmd) != 0)
 			DPRINTF(E_FATAL, L_GENERAL, "Failed to clean old file cache!  Exiting...\n");
-#else // __CYGWIN__
+#else // CYGWIN_OR_WIN32
 		delete_db_cygwin(db_path);
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 
 		open_db(&db);
 		if (CreateDatabase() != 0)
@@ -480,11 +480,11 @@ rescan:
 	}
 }
 
+#ifndef _WIN32
 static int
 writepidfile(const char *fname, int pid, uid_t uid)
 {
 	int ret = 0;
-#ifndef _WIN32
 	FILE *pidfile;
 	struct stat st;
 	char path[PATH_MAX], *dir;
@@ -542,10 +542,10 @@ writepidfile(const char *fname, int pid, uid_t uid)
 	}
 
 	fclose(pidfile);
-#endif
 
 	return ret;
 }
+#endif
 
 static int strtobool(const char *str)
 {
@@ -570,10 +570,10 @@ static void init_nls(void)
 	messages = setlocale(LC_MESSAGES, "");
 	if (!messages)
 		messages = "unset";
-#ifndef __CYGWIN__  
+#ifndef CYGWIN_OR_WIN32  
 	locale_dir = bindtextdomain("minidlna", getenv("TEXTDOMAINDIR"));
 	DPRINTF(E_DEBUG, L_GENERAL, "Using locale dir '%s' and locale langauge %s/%s\n", locale_dir, messages, ctype);
-#else // __CYGWIN__
+#else // CYGWIN_OR_WIN32
 {
 	char *textdomaindir, *path=db_path, conv_path[PATH_MAX];
 	if( (textdomaindir = getenv("TEXTDOMAINDIR")) != NULL )
@@ -583,7 +583,7 @@ static void init_nls(void)
 	}
 	fprintf(stderr, "Using locale dir %s\n", bindtextdomain("minidlna", path));
 }
-#endif //  __CYGWIN__  
+#endif //  CYGWIN_OR_WIN32  
 	textdomain("minidlna");
 #endif
 }
@@ -608,11 +608,11 @@ init(int argc, char **argv)
 	struct sigaction sa;
 #endif
 	const char * presurl = NULL;
-#if defined(__CYGWIN__) && defined(WIN_PROFILE_SUPPORT)
+#if defined(CYGWIN_OR_WIN32) && defined(WIN_PROFILE_SUPPORT)
 	const char * optionsfile = optionsfile_cygwin;
 #else
 	const char * optionsfile = "/etc/minidlna.conf";
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 	char mac_str[13];
 	char *string, *word;
 	char *path;
@@ -622,8 +622,10 @@ init(int argc, char **argv)
 	struct media_dir_s *media_dir;
 	int ifaces = 0;
 	media_types types;
+#ifndef _WIN32
 	uid_t uid = 0;
 	gid_t gid = 0;
+#endif
 
 	/* first check if "-f" option is used */
 	for (i=2; i<argc; i++)
@@ -705,17 +707,17 @@ init(int argc, char **argv)
 			types = ALL_MEDIA;
 			path = ary_options[i].value;
 			word = strchr(path, ',');
+#ifdef CYGWIN_OR_WIN32
 #ifdef __CYGWIN__
-#ifndef _WIN32
 			if ((cygwin_posix_path_list_p(path) == FALSE) || (strchr(path, '\\') != NULL))
 			{
 				if (cygwin_conv_path(CCP_WIN_A_TO_POSIX | CCP_ABSOLUTE, path, buf, PATH_MAX))
 					word = NULL;
 			}
 			else
-#endif
-				strncpy(buf, path, PATH_MAX);
 #endif // __CYGWIN__
+				strncpy(buf, path, PATH_MAX);
+#endif // CYGWIN_OR_WIN32
 			if (word && (my_access(path, F_OK) != 0))
 			{
 				types = 0;
@@ -984,13 +986,13 @@ init(int argc, char **argv)
 			SETFLAG(RESCAN_MASK);
 			break;
 		case 'R':
-#ifndef __CYGWIN__
+#ifndef CYGWIN_OR_WIN32
 			snprintf(buf, sizeof(buf), "rm -rf %s/files.db %s/art_cache", db_path, db_path);
 			if (system(buf) != 0)
 				DPRINTF(E_FATAL, L_GENERAL, "Failed to clean old file cache %s. EXITING\n", db_path);
-#else // __CYGWIN__
+#else // CYGWIN_OR_WIN32
 			delete_db_cygwin(db_path);
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 			break;
 #ifndef _WIN32
 		case 'u':
@@ -1198,7 +1200,7 @@ main(int argc, char **argv)
 #ifdef HAVE_INOTIFY
 #ifdef _WIN32
 	HANDLE inotify_thread = NULL;
-	hHttpUPNPHandle = CreateMutex(NULL, NULL, NULL);
+	hHttpUPNPHandle = CreateMutex(NULL, FALSE, NULL);
 #else
 	pthread_t inotify_thread = 0;
 #endif
@@ -1213,7 +1215,7 @@ main(int argc, char **argv)
 	for (i = 0; i < L_MAX; i++)
 		log_level[i] = E_WARN;
   
-#if defined(__CYGWIN__) && defined(WIN_PROFILE_SUPPORT)
+#if defined(CYGWIN_OR_WIN32) && defined(WIN_PROFILE_SUPPORT)
 	{
 		char *localappdata;
 		if( (localappdata = getenv("LOCALAPPDATA")) == NULL ) // Windows7, Vista
@@ -1231,7 +1233,7 @@ main(int argc, char **argv)
 			pidfilename = pidfilename_cygwin;
 		}
 	}
-#endif // __CYGWIN__  
+#endif // CYGWIN_OR_WIN32  
 
 	ret = init(argc, argv);
 	if (ret != 0)
@@ -1246,9 +1248,9 @@ main(int argc, char **argv)
 
 	LIST_INIT(&upnphttphead);
 
-#ifdef __CYGWIN__
+#ifdef CYGWIN_OR_WIN32
 	DPRINTF(E_INFO, L_GENERAL, "db_path = %s\n", db_path);
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 
 	ret = open_db(NULL);
 	if (ret == 0)
@@ -1433,10 +1435,10 @@ main(int argc, char **argv)
 		FD_ZERO(&writeset);
 		upnpevents_selectfds(&readset, &writeset, &max_fd);
 
-#ifdef __CYGWIN__
+#ifdef CYGWIN_OR_WIN32
 		if (GETFLAG(SCANNING_MASK))
 			timeout.tv_sec = 1;
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 		ret = select(max_fd+1, &readset, &writeset, 0, &timeout);
 		if (ret < 0)
 		{
@@ -1459,11 +1461,11 @@ main(int argc, char **argv)
 			ProcessTiVoBeacon(sbeacon);
 		}
 #endif
-#ifndef __CYGWIN__
+#ifndef CYGWIN_OR_WIN32
 		if (smonitor >= 0 && FD_ISSET(smonitor, &readset))
-#else // __CYGWIN__
+#else // CYGWIN_OR_WIN32
 		if (smonitor == -2)
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 		{
 			ProcessMonitorEvent(smonitor);
 		}
@@ -1554,6 +1556,12 @@ shutdown:
 	if (GETFLAG(SCANNING_MASK) && scanner_pid)
 		kill(scanner_pid, SIGKILL);
 #endif
+	for(e = upnphttphead.lh_first; e != NULL; e = next) {
+		next = e->entries.le_next;
+		if(e->state == 50) {
+			shutdown(e->socket, SD_BOTH);
+		}
+	}
 
 	/* close out open sockets */
 	while (upnphttphead.lh_first != NULL)
@@ -1612,6 +1620,7 @@ shutdown:
 	if(hMutexHandle != INVALID_HANDLE_VALUE) {
 		ReleaseMutex(hMutexHandle);
 		CloseHandle(hMutexHandle);
+		CloseHandle(hHttpUPNPHandle);
 	}
 #endif
 	exit(EXIT_SUCCESS);

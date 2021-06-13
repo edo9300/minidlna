@@ -61,6 +61,9 @@
 #include "codelength.h"
 #include "utils.h"
 #include "log.h"
+#if defined(__CYGWIN__) || defined(_WIN32)
+#define CYGWIN_OR_WIN32
+#endif
 
 /* SSDP ip/port */
 #define SSDP_PORT (1900)
@@ -130,7 +133,7 @@ OpenAndConfSSDPReceiveSocket(void)
 	 * see AddMulticastMembership(...). */
 	 sockname.sin_addr.s_addr = inet_addr(SSDP_MCAST_ADDR);
 #else
-#if defined(__CYGWIN__) || defined(_WIN32)
+#ifdef CYGWIN_OR_WIN32
 	// Windows doesn't allow (for some reason) multicast join on already binded socket
 	{
 		int ret;
@@ -216,13 +219,13 @@ OpenAndConfSSDPNotifySocket(struct lan_addr_s *iface)
 		close(s);
 		return -1;
 	}
-#if !defined(__CYGWIN__) && !defined(_WIN32)
+#ifndef CYGWIN_OR_WIN32
 	if (AddMulticastMembership(sssdp, iface) < 0)
 	{
 		DPRINTF(E_WARN, L_SSDP, "Failed to add multicast membership for address %s\n", 
 			iface->str);
 	}
-#endif // __CYGWIN__
+#endif // CYGWIN_OR_WIN32
 	return s;
 }
 
