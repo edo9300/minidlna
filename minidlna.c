@@ -1609,8 +1609,10 @@ shutdown:
 
 	upnpevents_removeSubscribers();
 
+#ifndef _WIN32
 	if (pidfilename && unlink(pidfilename) < 0)
 		DPRINTF(E_ERROR, L_GENERAL, "Failed to remove pidfile %s: %s\n", pidfilename, strerror(errno));
+#endif
 
 	log_close();
 	freeoptions();
