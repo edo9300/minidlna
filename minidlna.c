@@ -58,6 +58,12 @@
 #include <errno.h>
 #include <limits.h>
 #ifdef _WIN32
+#ifndef WIN_PROFILE_SUPPORT
+#define WIN_PROFILE_SUPPORT
+#endif
+#include <WinSock2.h>
+#include <windows.h>
+#include <io.h>
 #define pid_t int
 #else
 #include <unistd.h>
@@ -104,16 +110,13 @@
 #include <sys/cygwin.h>
 #include <windows.h>
 #endif // __CYGWIN__
+
 #if defined(__CYGWIN__) || defined(_WIN32)
 #define CYGWIN_OR_WIN32
 #endif
+
 #ifdef _WIN32
-#define WIN_PROFILE_SUPPORT
-#define STATIC
-#include <WinSock2.h>
 #define socklen_t int
-#include <windows.h>
-#include <io.h>
 #define MAX max
 #define close closesocket
 extern HANDLE hMutexHandle;
@@ -268,7 +271,7 @@ getfriendlyname(char *buf, int len)
 #else
 	char * logname;
 	logname = getenv("LOGNAME");
-#ifndef STATIC // Disable for static linking
+#if !defined(STATIC) && !defined(_WIN32) // Disable for static linking
 	if (!logname)
 	{
 		struct passwd * pwent;
