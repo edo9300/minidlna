@@ -34,3 +34,6 @@ po/stamp-po
 stamp-h1
 .deps/
 *.o
+obj/
+bin/
+build/
