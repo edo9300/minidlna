@@ -213,7 +213,11 @@ char* basename(char* path) {
 }
 
 int link(const char* path1, const char* path2) {
-	BOOL ret = CreateHardLink(path1, path2, NULL);
+	wchar_t* wpath1 = ToWide(path1);
+	wchar_t* wpath2 = ToWide(path2);
+	BOOL ret = CreateHardLinkW(wpath2, wpath1, NULL);
+	free(wpath2);
+	free(wpath1);
 	if(ret == 0) {
 		if(GetLastError() == ERROR_PATH_NOT_FOUND) {
 			errno = ENOENT;
