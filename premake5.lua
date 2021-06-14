@@ -4,6 +4,7 @@ workspace "minidlna"
 	startproject "minidlna"
 	staticruntime "on"
 	configurations { "Debug", "Release" }
+	platforms { "Win32", "x64" }
 
 	filter "system:windows"
 		systemversion "latest"
