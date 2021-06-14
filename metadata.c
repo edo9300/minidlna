@@ -25,7 +25,6 @@
 #include <sys/types.h>
 #ifdef _WIN32
 #include <io.h>
-#define O_RDONLY 0
 #else
 #include <libgen.h>
 #include <unistd.h>
