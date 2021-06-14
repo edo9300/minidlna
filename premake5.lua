@@ -28,7 +28,7 @@ project "minidlna"
 	rtti "Off"
 	files { "*.c", "**.h" }
 	files { "tagutils/tagutils.c" }
-	excludes { "testupnpdescgen.c", "icons.c" }
+	excludes { "testupnpdescgen.c", "icons.c", "linux/**" }
 	includedirs { "libid3tag" }
 	links { "libid3tag", "Strmiids.lib", "ws2_32.lib", "Mf.lib", "Mfplat.lib", "Iphlpapi.lib", "Secur32.lib", "Bcrypt.lib", "mfuuid.lib" }
 	

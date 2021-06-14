@@ -29,6 +29,10 @@
 # include <stdlib.h>
 # include <string.h>
 
+# ifdef _WIN32
+#  include <io.h> //for dup and dup2
+# endif
+
 # ifdef HAVE_UNISTD_H
 #  include <unistd.h>
 # endif
