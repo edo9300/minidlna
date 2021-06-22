@@ -160,7 +160,7 @@ static DWORD GetBasePathFromPathName(LPTSTR szPathName,
 		_ftprintf(stderr, TEXT("Error copying string. _tcscat_s returned %d\n"), dwReturnCode);
 		return FAILURE_API_CALL;
 	}
-	szBasePath[PathLength - 1] = 0;
+	szBasePath[PathLength > 0 ? PathLength - 1 : 0] = 0;
 	return SUCCESS;
 }
 
