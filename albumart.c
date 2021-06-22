@@ -283,10 +283,10 @@ check_for_album_file(const char *path)
 	int width=0, height=0;
 	char *art_file, *p;
 	const char *dir;
-	struct stat st;
+	struct my_stat st;
 	int ret;
 
-	if(stat(path, &st) != 0 )
+	if(my_stat(path, &st) != 0 )
 		return NULL;
 
 	if( S_ISDIR(st.st_mode) )

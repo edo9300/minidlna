@@ -376,7 +376,7 @@ monitor_insert_file(const char *name, const char *path)
 	int ts;
 	media_types dir_types;
 	media_types mtype = get_media_type(path);
-	struct stat st;
+	struct my_stat st;
 
 	/* Is it cover art for another file? */
 	if (mtype == TYPE_IMAGE)
@@ -412,7 +412,7 @@ monitor_insert_file(const char *name, const char *path)
 		return -1;
 	
 	/* If it's already in the database and hasn't been modified, skip it. */
-	if( stat(path, &st) != 0 )
+	if( my_stat(path, &st) != 0 )
 		return -1;
 
 	ts = sql_get_int_field(db, "SELECT TIMESTAMP from %s where PATH = '%q'", tbl, path);
@@ -810,7 +810,7 @@ insert_to_delete_from_db(int searchNo)
 	char path_buf[PATH_BUF_SIZE], fullPath[PATH_BUF_SIZE];
 	int fd=0, ret_stat;
 	char * esc_name = NULL;
-	struct stat file_stat;
+	struct my_stat file_stat;
 
 	m_BufferTmp = 	m_Buffer[searchNo];
 	do {
@@ -828,7 +828,7 @@ insert_to_delete_from_db(int searchNo)
 		esc_name = modifyString(strdup(rindex(path_buf, '/') + 1), "&", "&amp;amp;", 0);
 		//DPRINTF(E_DEBUG, L_INOTIFY, "esc_name %s\n", esc_name);
 
-		ret_stat = stat(path_buf, &file_stat);
+		ret_stat = my_stat(path_buf, &file_stat);
 		if ((m_BufferTmp->Action == FILE_ACTION_REMOVED) || (ret_stat != 0))
 		{
 			// there is no way to distinguish file/dir in case of delete.

@@ -288,10 +288,10 @@ static time_t
 _get_dbtime(void)
 {
 	char path[PATH_MAX];
-	struct stat st;
+	struct my_stat st;
 
 	snprintf(path, sizeof(path), "%s/files.db", db_path);
-	if (stat(path, &st) != 0)
+	if (my_stat(path, &st) != 0)
 		return 0;
 	return st.st_mtime;
 }
