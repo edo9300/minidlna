@@ -531,7 +531,7 @@ make_dir(char * path, mode_t mode)
 #ifdef UNICODE
 		wchar_t* wpath = ToWide(path);
 		int failure = !CreateDirectory(wpath, NULL);
-		free(path);
+		free(wpath);
 		if(failure) {
 #else
 		if(!CreateDirectory(path, NULL)) {
