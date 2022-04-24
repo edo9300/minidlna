@@ -1184,9 +1184,11 @@ init(int argc, char **argv)
 int
 main(int argc, char **argv)
 {
+#ifdef _WIN32
 	const WORD wVersionRequested = MAKEWORD(2, 2);
 	WSADATA wsaData;
 	WSAStartup(wVersionRequested, &wsaData);
+#endif
 	int ret, i;
 	int shttpl = -1;
 	int smonitor = -1;
