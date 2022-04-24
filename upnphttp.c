@@ -1501,9 +1501,9 @@ SendResp_albumArt(struct upnphttp * h, char * object)
 		return;
 	}
 	sqlite3_free(path);
-	fseek(fd, 0, SEEK_END);
+	fseeko(fd, 0, SEEK_END);
 	size = ftello(fd);
-	fseek(fd, 0, SEEK_SET);
+	fseeko(fd, 0, SEEK_SET);
 
 	INIT_STR(str, header);
 
@@ -1552,9 +1552,9 @@ SendResp_caption(struct upnphttp * h, char * object)
 		return;
 	}
 	sqlite3_free(path);
-	fseek(fd, 0, SEEK_END);
+	fseeko(fd, 0, SEEK_END);
 	size = ftello(fd);
-	fseek(fd, 0, SEEK_SET);
+	fseeko(fd, 0, SEEK_SET);
 
 	INIT_STR(str, header);
 
@@ -2051,9 +2051,9 @@ SendResp_dlnafile(struct upnphttp *h, char *object)
 			Send404(h);
 		goto error;
 	}
-	fseek(sendfh, 0, SEEK_END);
+	fseeko(sendfh, 0, SEEK_END);
 	size = ftello(sendfh);
-	fseek(sendfh, 0, SEEK_SET);
+	fseeko(sendfh, 0, SEEK_SET);
 
 	INIT_STR(str, header);
 
